@@ -6,6 +6,9 @@
 
 #pragma once
 
+#include "cutlass/arch/memory.h"
+#include "cutlass/arch/cache_operation.h"
+
 template <typename T>
 __global__ void moe_permute_kernel(const T *original_input,
                                    T *permuted_output,
@@ -30,12 +33,14 @@ __global__ void moe_permute_kernel(const T *original_input,
     }
 
     // permute activations rows based on experts
+    const int kElementsPerAccess = 16 / sizeof(T);
     const T *source_row_ptr = original_input + source_row * num_cols;
     T *dest_row_ptr = permuted_output + dest_row * num_cols;
 
-    for (int tid = threadIdx.x; tid < num_cols; tid += blockDim.x)
+    for (int tid = threadIdx.x * kElementsPerAccess; tid < num_cols; tid += blockDim.x * kElementsPerAccess)
     {
-        dest_row_ptr[tid] = source_row_ptr[tid];
+        cutlass::arch::global_load<float4, sizeof(float4), cutlass::arch::CacheOperation::LastUse>(
+            *(float4 *)(dest_row_ptr + tid), (source_row_ptr + tid), true);
     }
 }
 
@@ -56,12 +61,14 @@ __global__ void moe_recover_kernel(const T *original_input,
     int source_row = map_dest_row_to_source_row[dest_row];
 
     // permute activations rows based on experts
+    const int kElementsPerAccess = 16 / sizeof(T);
     const T *source_row_ptr = original_input + source_row * num_cols;
     T *dest_row_ptr = permuted_output + dest_row * num_cols;
 
-    for (int tid = threadIdx.x; tid < num_cols; tid += blockDim.x)
+    for (int tid = threadIdx.x * kElementsPerAccess; tid < num_cols; tid += blockDim.x * kElementsPerAccess)
     {
-        dest_row_ptr[tid] = source_row_ptr[tid];
+        cutlass::arch::global_load<float4, sizeof(float4), cutlass::arch::CacheOperation::LastUse>(
+            *(float4 *)(dest_row_ptr + tid), (source_row_ptr + tid), true);
     }
 }
 

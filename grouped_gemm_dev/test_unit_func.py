@@ -136,7 +136,7 @@ class TestMoe(unittest.TestCase):
     nvtx.range_push("unpermute op")
     start_time = time.perf_counter()
     for _ in range(execution_times):
-      original_output, _ = self.moe_recover_op(permuted_inputs, source_row_to_dest_row, [], num_rows)
+      original_output = self.moe_recover_op(permuted_inputs, source_row_to_dest_row)
     end_time = time.perf_counter()
     elapsed_time = (end_time - start_time) / execution_times * 1000
     nvtx.range_pop()
@@ -225,7 +225,7 @@ class TestMoe(unittest.TestCase):
     nvtx.range_pop()
 
     nvtx.range_push("unpermute op")
-    original_output, _ = self.moe_recover_op(gemm1_output, source_row_to_dest_row, [], num_rows)
+    original_output = self.moe_recover_op(gemm1_output, source_row_to_dest_row)
     nvtx.range_pop()
     nvtx.range_pop()
 

@@ -36,7 +36,8 @@ class TestMoeOps(unittest.TestCase):
                          PRINT):
 
     # Prepare inputs
-    expert_for_rows = torch.randint(size=(num_rows,),low=0,high=num_experts, dtype=torch.int32).cuda()
+    _1_expert_for_rows = torch.randint(size=(num_rows,),low=0,high=num_experts, dtype=torch.int32).cuda()
+    _2_expert_for_rows = torch.randint(size=(num_rows,),low=0,high=num_experts, dtype=torch.int32).cuda()
     # For debug test, this will get a source_row_to_dest_row of [7, 2, 0, 9, 5, 1, 6, 3, 8, 4]
     # expert_for_rows = torch.tensor([3, 1, 0, 4, 2, 0, 2, 1, 3, 1])
     unpermuted_inputs = torch.empty(size=(num_rows, num_cols), dtype=dtype).cuda()
@@ -52,36 +53,51 @@ class TestMoeOps(unittest.TestCase):
       # expert_for_rows = torch.nn.functional.pad(expert_for_rows, [0, 1])
 
       nvtx.range_push("permute op forward")
-      permuted_inputs, source_row_to_dest_row = permute(unpermuted_inputs, expert_for_rows, max_token_num)
+      _1_permuted_inputs, _1_source_row_to_dest_row = permute(unpermuted_inputs, _1_expert_for_rows, max_token_num)
       nvtx.range_pop()
 
       # shape mismatch test
       # expert_for_rows = torch.nn.functional.pad(expert_for_rows, [0, 1])
-      
+
       nvtx.range_push("unpermute op forward")
-      unpermute_outputs = unpermute(permuted_inputs, expert_for_rows, source_row_to_dest_row, max_token_num)
+      _1_unpermute_outputs = unpermute(_1_permuted_inputs, _1_expert_for_rows, _1_source_row_to_dest_row, max_token_num)
+      nvtx.range_pop()
+
+      nvtx.range_push("permute op forward")
+      _2_permuted_inputs, _2_source_row_to_dest_row = permute(_1_unpermute_outputs, _2_expert_for_rows, max_token_num)
+      nvtx.range_pop()
+
+      nvtx.range_push("unpermute op forward")
+      _2_unpermute_outputs = unpermute(_2_permuted_inputs, _2_expert_for_rows, _2_source_row_to_dest_row, max_token_num)
       nvtx.range_pop()
 
       # Reset grad to avoid accumulation
       unpermuted_inputs.grad = torch.zeros_like(unpermuted_inputs)
-      permuted_inputs.grad = torch.zeros_like(permuted_inputs)
+      _1_permuted_inputs.grad = torch.zeros_like(_1_permuted_inputs)
+      _1_unpermute_outputs.grad = torch.zeros_like(_1_unpermute_outputs)
+      _2_permuted_inputs.grad = torch.zeros_like(_2_permuted_inputs)
 
       # Backward
       nvtx.range_push("permute & unpermute op backward")
-      unpermute_outputs.backward(unpermute_outputs.detach())
+      _2_unpermute_outputs.backward(_2_unpermute_outputs.detach())
       nvtx.range_pop()
 
     if PRINT:
-      print("expert_for_rows: {}".format(expert_for_rows))
       print("unpermuted_inputs: {}".format(unpermuted_inputs))
-      print("permuted_inputs: {}".format(permuted_inputs))
-      print("unpermute_outputs: {}".format(unpermute_outputs))
+      print("_1_expert_for_rows: {}".format(_1_expert_for_rows))
+      print("_1_permuted_inputs: {}".format(_1_permuted_inputs))
+      print("_1_source_row_to_dest_row: {}".format(_1_source_row_to_dest_row))
+      print("_1_unpermute_outputs: {}".format(_1_unpermute_outputs))
+      print("_2_expert_for_rows: {}".format(_2_expert_for_rows))
+      print("_2_permuted_inputs: {}".format(_2_permuted_inputs))
+      print("_2_source_row_to_dest_row: {}".format(_2_source_row_to_dest_row))
+      print("_2_unpermute_outputs: {}".format(_2_unpermute_outputs))
       print("original_inputs: {}".format(original_inputs))
       print("backward: {}".format(unpermuted_inputs.grad))
 
     # Result check
     original_inputs = original_inputs.float().cpu().numpy().flatten()
-    original_output = unpermute_outputs.float().cpu().detach().numpy().flatten()
+    original_output = _2_unpermute_outputs.float().cpu().detach().numpy().flatten()
     max_abs_error = abs(original_inputs - original_output).max()
     print(f"permute & unpermute forward max error: \t\t{max_abs_error:.3e} ({dtype})")
     assert (max_abs_error < atol), "test_moe_permute failed!"

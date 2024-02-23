@@ -55,7 +55,7 @@ python test_torch_ops.py
 > moe.ops.permute(
 >   unpermuted_inputs: torch.Tensor,
 >   expert_for_rows: torch.Tensor,
->   max_token_num: int) -> tuple
+>   max_token_num=0: int) -> tuple
 > ```
 
 The output tuple of `(torch.Tensor, torch.Tensor)` that contains two tensors `permuted_inputs` and `source_row_to_dest_row`.
@@ -84,7 +84,7 @@ The output tuple of `(torch.Tensor, torch.Tensor)` that contains two tensors `pe
 >   permuted_inputs: torch.Tensor,
 >   expert_for_rows: torch.Tensor,
 >   source_row_to_dest_row: torch.Tensor,
->   max_token_num: int) -> torch.Tensor
+>   max_token_num=0: int) -> torch.Tensor
 > ```
 
 The mirror operator of `moe.ops.permute`.

@@ -20,7 +20,6 @@ torch.classes.load_library(so_dir + '/libmoe_unit_ops.so')
 class PermuteMoE(torch.autograd.Function):
   
   workspace_fw=None
-  workspace_bw=None
   dtype=None
   max_token_num=0
 
@@ -56,18 +55,16 @@ class PermuteMoE(torch.autograd.Function):
       print("[Warning] The input \"expert_for_rows\" of permute op is discontiguous!", file=stderr)
       expert_for_rows = expert_for_rows.contiguous()
 
-    if PermuteMoE.max_token_num < max_token_num:
+    input_max_token_num = max(max_token_num, unpermuted_inputs.size(0))
+    if PermuteMoE.max_token_num < input_max_token_num:
       # print("Permute op workspace reset!")
-      PermuteMoE.max_token_num = max_token_num
+      PermuteMoE.max_token_num = input_max_token_num
       PermuteMoE.workspace_fw = []
-      PermuteMoE.workspace_bw = []
 
-    if PermuteMoE.max_token_num < unpermuted_inputs.size(0) or PermuteMoE.dtype != unpermuted_inputs.dtype:
+    if PermuteMoE.dtype != unpermuted_inputs.dtype:
       # print("Permute op workspace reset!")
-      PermuteMoE.max_token_num = unpermuted_inputs.size(0)
       PermuteMoE.dtype = unpermuted_inputs.dtype
       PermuteMoE.workspace_fw = []
-      PermuteMoE.workspace_bw = []
 
     permuted_inputs, source_row_to_dest_row, PermuteMoE.workspace_fw = torch.ops.moe_unit_ops.moe_permute_op(
       unpermuted_inputs,
@@ -85,11 +82,9 @@ class PermuteMoE(torch.autograd.Function):
       permuted_inputs_grad = permuted_inputs_grad.contiguous()
     source_row_to_dest_row = ctx.source_row_to_dest_row
 
-    original_output, PermuteMoE.workspace_bw = torch.ops.moe_unit_ops.moe_recover_op(
+    original_output = torch.ops.moe_unit_ops.moe_recover_op(
       permuted_inputs_grad,
-      source_row_to_dest_row,
-      PermuteMoE.workspace_bw,
-      PermuteMoE.max_token_num)
+      source_row_to_dest_row)
 
     return original_output, None, None
 
@@ -102,7 +97,6 @@ class PermuteMoE(torch.autograd.Function):
 class UnpermuteMoE(torch.autograd.Function):
 
   workspace_fw=None
-  workspace_bw=None
   dtype=None
   max_token_num=0
   
@@ -153,22 +147,18 @@ class UnpermuteMoE(torch.autograd.Function):
       # print("Unpermute op workspace reset!")
       UnpermuteMoE.max_token_num = max_token_num
       UnpermuteMoE.workspace_fw = []
-      UnpermuteMoE.workspace_bw = []
 
     if UnpermuteMoE.max_token_num < permuted_inputs.size(0) or UnpermuteMoE.dtype != permuted_inputs.dtype:
       # print("Unpermute op workspace reset!")
       UnpermuteMoE.max_token_num = permuted_inputs.size(0)
       UnpermuteMoE.dtype = permuted_inputs.dtype
       UnpermuteMoE.workspace_fw = []
-      UnpermuteMoE.workspace_bw = []
 
     ctx.expert_for_rows = expert_for_rows
 
-    original_output, UnpermuteMoE.workspace_bw = torch.ops.moe_unit_ops.moe_recover_op(
+    original_output = torch.ops.moe_unit_ops.moe_recover_op(
       permuted_inputs,
-      source_row_to_dest_row,
-      UnpermuteMoE.workspace_bw,
-      UnpermuteMoE.max_token_num)
+      source_row_to_dest_row)
     
     return original_output
   
@@ -282,10 +272,10 @@ class GroupedGemmMoE(torch.autograd.Function):
 ##
 ################################################################################################
 
-def permute(unpermuted_inputs, expert_for_rows, max_token_num):
+def permute(unpermuted_inputs, expert_for_rows, max_token_num=0):
   return PermuteMoE.apply(unpermuted_inputs, expert_for_rows, max_token_num)
 
-def unpermute(permuted_inputs, expert_for_rows, source_row_to_dest_row, max_token_num):
+def unpermute(permuted_inputs, expert_for_rows, source_row_to_dest_row, max_token_num=0):
   return UnpermuteMoE.apply(permuted_inputs, expert_for_rows, source_row_to_dest_row, max_token_num)
 
 def groupedgemm(permuted_inputs, weights, tokens_per_expert, transB=False):
