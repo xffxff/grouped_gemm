@@ -66,25 +66,25 @@ class PermuteMoE(torch.autograd.Function):
       PermuteMoE.dtype = unpermuted_inputs.dtype
       PermuteMoE.workspace_fw = []
 
-    permuted_inputs, source_row_to_dest_row, PermuteMoE.workspace_fw = torch.ops.moe_unit_ops.moe_permute_op(
+    permuted_inputs, row_id_map, PermuteMoE.workspace_fw = torch.ops.moe_unit_ops.moe_permute_op(
       unpermuted_inputs,
       expert_for_rows,
       PermuteMoE.workspace_fw,
       PermuteMoE.max_token_num)
 
-    ctx.source_row_to_dest_row = source_row_to_dest_row
+    ctx.row_id_map = row_id_map
 
-    return permuted_inputs, source_row_to_dest_row
+    return permuted_inputs, row_id_map
 
   @staticmethod
   def backward(ctx, permuted_inputs_grad, _):
     if not permuted_inputs_grad.is_contiguous():
       permuted_inputs_grad = permuted_inputs_grad.contiguous()
-    source_row_to_dest_row = ctx.source_row_to_dest_row
+    row_id_map = ctx.row_id_map
 
     original_output = torch.ops.moe_unit_ops.moe_recover_op(
       permuted_inputs_grad,
-      source_row_to_dest_row)
+      row_id_map)
 
     return original_output, None, None
 
@@ -104,7 +104,7 @@ class UnpermuteMoE(torch.autograd.Function):
   def forward(ctx,
               permuted_inputs: torch.Tensor,
               expert_for_rows: torch.Tensor,
-              source_row_to_dest_row: torch.Tensor,
+              row_id_map: torch.Tensor,
               max_token_num: int):
 
     # Device check
@@ -113,9 +113,9 @@ class UnpermuteMoE(torch.autograd.Function):
     if expert_for_rows.is_cpu:
       print("[Warning] The input \"expert_for_rows\" of unpermute op is on the device: CPU!", file=stderr)
       expert_for_rows = expert_for_rows.cuda()
-    if source_row_to_dest_row.is_cpu:
-      print("[Warning] The input \"source_row_to_dest_row\" of unpermute op is on the device: CPU!", file=stderr)
-      source_row_to_dest_row = source_row_to_dest_row.cuda()
+    if row_id_map.is_cpu:
+      print("[Warning] The input \"row_id_map\" of unpermute op is on the device: CPU!", file=stderr)
+      row_id_map = row_id_map.cuda()
 
     # Shape check
     if permuted_inputs.size(0) != expert_for_rows.size(0):
@@ -127,10 +127,10 @@ class UnpermuteMoE(torch.autograd.Function):
       print("[Warning] The data type of the input \"expert_for_rows\" of unpermute op is Int64! "
             "The recommended type is int32.", file=stderr)
       expert_for_rows = expert_for_rows.to(torch.int32)
-    if source_row_to_dest_row.dtype != torch.int32:
-      print("[Warning] The data type of the input \"source_row_to_dest_row\" of unpermute op is Int64! "
+    if row_id_map.dtype != torch.int32:
+      print("[Warning] The data type of the input \"row_id_map\" of unpermute op is Int64! "
             "The recommended type is int32.", file=stderr)
-      source_row_to_dest_row = source_row_to_dest_row.to(torch.int32)
+      row_id_map = row_id_map.to(torch.int32)
 
     # Contiguous check
     if not permuted_inputs.is_contiguous():
@@ -139,9 +139,9 @@ class UnpermuteMoE(torch.autograd.Function):
     if not expert_for_rows.is_contiguous():
       print("[Warning] The input \"expert_for_rows\" of unpermute op is discontiguous!", file=stderr)
       expert_for_rows = expert_for_rows.contiguous()
-    if not source_row_to_dest_row.is_contiguous():
-      print("[Warning] The input \"source_row_to_dest_row\" of unpermute op is discontiguous!", file=stderr)
-      source_row_to_dest_row = source_row_to_dest_row.contiguous()
+    if not row_id_map.is_contiguous():
+      print("[Warning] The input \"row_id_map\" of unpermute op is discontiguous!", file=stderr)
+      row_id_map = row_id_map.contiguous()
 
     if UnpermuteMoE.max_token_num < max_token_num:
       # print("Unpermute op workspace reset!")
@@ -158,7 +158,7 @@ class UnpermuteMoE(torch.autograd.Function):
 
     original_output = torch.ops.moe_unit_ops.moe_recover_op(
       permuted_inputs,
-      source_row_to_dest_row)
+      row_id_map)
     
     return original_output
   
@@ -275,8 +275,8 @@ class GroupedGemmMoE(torch.autograd.Function):
 def permute(unpermuted_inputs, expert_for_rows, max_token_num=0):
   return PermuteMoE.apply(unpermuted_inputs, expert_for_rows, max_token_num)
 
-def unpermute(permuted_inputs, expert_for_rows, source_row_to_dest_row, max_token_num=0):
-  return UnpermuteMoE.apply(permuted_inputs, expert_for_rows, source_row_to_dest_row, max_token_num)
+def unpermute(permuted_inputs, expert_for_rows, row_id_map, max_token_num=0):
+  return UnpermuteMoE.apply(permuted_inputs, expert_for_rows, row_id_map, max_token_num)
 
 def groupedgemm(permuted_inputs, weights, tokens_per_expert, transB=False):
   return GroupedGemmMoE.apply(permuted_inputs, weights, tokens_per_expert, transB)

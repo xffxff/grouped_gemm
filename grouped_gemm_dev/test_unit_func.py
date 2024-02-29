@@ -117,26 +117,26 @@ class TestMoe(unittest.TestCase):
     original_inputs = unpermuted_inputs.detach()
 
     for _ in range(warmup_times):
-      permuted_inputs, source_row_to_dest_row, _ = self.moe_permute_op(unpermuted_inputs, expert_for_rows, [], num_rows)
+      permuted_inputs, row_id_map, _ = self.moe_permute_op(unpermuted_inputs, expert_for_rows, [], num_rows)
 
     nvtx.range_push("permute test")
     nvtx.range_push("permute op")
     start_time = time.perf_counter()
     for _ in range(execution_times):
-      permuted_inputs, source_row_to_dest_row, _ = self.moe_permute_op(unpermuted_inputs, expert_for_rows, [], num_rows)
+      permuted_inputs, row_id_map, _ = self.moe_permute_op(unpermuted_inputs, expert_for_rows, [], num_rows)
     end_time = time.perf_counter()
     elapsed_time = (end_time - start_time) / execution_times * 1000
     nvtx.range_pop()
 
     if PRINT:
       print("permuted_inputs: {}".format(permuted_inputs))
-      print("source_row_to_dest_row: {}".format(source_row_to_dest_row))
+      print("row_id_map: {}".format(row_id_map))
       print("elapsed_time: {} ms".format(elapsed_time))
 
     nvtx.range_push("unpermute op")
     start_time = time.perf_counter()
     for _ in range(execution_times):
-      original_output = self.moe_recover_op(permuted_inputs, source_row_to_dest_row)
+      original_output = self.moe_recover_op(permuted_inputs, row_id_map)
     end_time = time.perf_counter()
     elapsed_time = (end_time - start_time) / execution_times * 1000
     nvtx.range_pop()
@@ -196,13 +196,13 @@ class TestMoe(unittest.TestCase):
 
     nvtx.range_push("grouped gemm fwd test")
     nvtx.range_push("permute op")
-    permuted_inputs, source_row_to_dest_row, _ = self.moe_permute_op(inputs["input_activations"], inputs["expert_for_rows"], [], num_rows)
+    permuted_inputs, row_id_map, _ = self.moe_permute_op(inputs["input_activations"], inputs["expert_for_rows"], [], num_rows)
     nvtx.range_pop()
 
     if PRINT:
       print("permuted_inputs: {}".format(permuted_inputs))
       print("weights: {}".format(weights["fc1_expert_weights_for_ft"]))
-      print("source_row_to_dest_row: {}".format(source_row_to_dest_row))
+      print("row_id_map: {}".format(row_id_map))
 
     input_dict = inputs
     input_dict.update(weights)
@@ -225,7 +225,7 @@ class TestMoe(unittest.TestCase):
     nvtx.range_pop()
 
     nvtx.range_push("unpermute op")
-    original_output = self.moe_recover_op(gemm1_output, source_row_to_dest_row)
+    original_output = self.moe_recover_op(gemm1_output, row_id_map)
     nvtx.range_pop()
     nvtx.range_pop()
 
@@ -303,13 +303,13 @@ class TestMoe(unittest.TestCase):
     nvtx.range_push("grouped gemm bwd test")
     nvtx.range_push("permute op")
     # Permutation on activations based on expert id
-    inputs["permuted_inputs"], source_row_to_dest_row, _ = self.moe_permute_op(inputs["input_activations"], inputs["expert_for_rows"], [], num_rows)
+    inputs["permuted_inputs"], row_id_map, _ = self.moe_permute_op(inputs["input_activations"], inputs["expert_for_rows"], [], num_rows)
     nvtx.range_pop()
 
     if PRINT:
       print("permuted_inputs: {}".format(inputs["permuted_inputs"]))
       print("weights: {}".format(weights["fc1_expert_weights_for_ft"]))
-      print("source_row_to_dest_row: {}".format(source_row_to_dest_row))
+      print("row_id_map: {}".format(row_id_map))
 
     input_dict = inputs
     input_dict.update(weights)

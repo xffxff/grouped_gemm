@@ -244,39 +244,22 @@ std::tuple<torch::Tensor, torch::Tensor, std::vector<Tensor>> moe_permute_op(
         auto options = torch::TensorOptions().dtype(torch::kInt32).device(torch::kCUDA).requires_grad(false);
         Tensor row_id = torch::range(0, max_token_num - 1, 1, options);
         Tensor sorted_expert_for_rows = torch::empty(max_token_num, options);
-        Tensor dest_row_to_source_row = torch::empty(max_token_num, options);
-        int *expert_for_rows_ptr = get_ptr<int>(expert_for_rows);
-        int *row_id_ptr = get_ptr<int>(row_id);
-        int *sorted_expert_for_rows_ptr = get_ptr<int>(sorted_expert_for_rows);
-        int *dest_row_to_source_row_ptr = get_ptr<int>(dest_row_to_source_row);
 
         size_t temp_storage_bytes = 0;
+        int *temp_ptr = nullptr;
         cub::DeviceRadixSort::SortPairs(nullptr, temp_storage_bytes,
-                                        expert_for_rows_ptr, sorted_expert_for_rows_ptr,
-                                        row_id_ptr, dest_row_to_source_row_ptr, max_token_num);
+                                        temp_ptr, temp_ptr,
+                                        temp_ptr, temp_ptr, max_token_num);
         Tensor temp_storage = 
             torch::empty(temp_storage_bytes, torch::dtype(torch::kInt8).device(torch::kCUDA).requires_grad(false));
 
         workspace.push_back(row_id);
         workspace.push_back(sorted_expert_for_rows);
-        workspace.push_back(dest_row_to_source_row);
         workspace.push_back(temp_storage);
     }
 
-    int *expert_for_rows_ptr = get_ptr<int>(expert_for_rows);
-    int *row_id_ptr = get_ptr<int>(workspace[0]);
-    int *sorted_expert_for_rows_ptr = get_ptr<int>(workspace[1]);
-    int *dest_row_to_source_row_ptr = get_ptr<int>(workspace[2]);
-
     const int num_rows = original_input.size(0);
     const int num_cols = original_input.size(1);
-
-    // Run sorting operation
-    void *d_temp_storage = get_ptr<void>(workspace[3]);
-    size_t temp_storage_bytes = std::numeric_limits<size_t>::max();
-    cub::DeviceRadixSort::SortPairs(d_temp_storage, temp_storage_bytes,
-                                    expert_for_rows_ptr, sorted_expert_for_rows_ptr,
-                                    row_id_ptr, dest_row_to_source_row_ptr, num_rows);
 
     // activations type
     const at::ScalarType _st = original_input.scalar_type();
@@ -284,11 +267,20 @@ std::tuple<torch::Tensor, torch::Tensor, std::vector<Tensor>> moe_permute_op(
     // Output buffer alloc
     Tensor permuted_output =
         torch::empty({num_rows, num_cols}, torch::dtype(_st).device(torch::kCUDA).requires_grad(false));
-    Tensor source_row_to_dest_row = 
+    Tensor row_id_map = 
         torch::empty(num_rows, torch::dtype(torch::kInt32).device(torch::kCUDA).requires_grad(false));
 
-    int *&map_dest_row_to_source_row = dest_row_to_source_row_ptr;
-    int *map_source_row_to_dest_row = get_ptr<int>(source_row_to_dest_row);;
+    int *expert_for_rows_ptr = get_ptr<int>(expert_for_rows);
+    int *row_id_ptr = get_ptr<int>(workspace[0]);
+    int *sorted_expert_for_rows_ptr = get_ptr<int>(workspace[1]);
+    int *row_id_map_ptr = get_ptr<int>(row_id_map);
+
+    // Run sorting operation
+    void *d_temp_storage = get_ptr<void>(workspace[2]);
+    size_t temp_storage_bytes = std::numeric_limits<size_t>::max();
+    cub::DeviceRadixSort::SortPairs(d_temp_storage, temp_storage_bytes,
+                                    expert_for_rows_ptr, sorted_expert_for_rows_ptr,
+                                    row_id_ptr, row_id_map_ptr, num_rows);
 
     auto stream = at::cuda::getCurrentCUDAStream().stream();
 
@@ -301,11 +293,10 @@ std::tuple<torch::Tensor, torch::Tensor, std::vector<Tensor>> moe_permute_op(
         dType *original_input_ptr = get_ptr<dType>(original_input);
         dType *permuted_output_ptr = get_ptr<dType>(permuted_output);
 
-        moe_permute_kernel_launcher<dType>(
+        moe_permute_kernel_launcher<dType, true>(
             original_input_ptr,
             permuted_output_ptr,
-            map_dest_row_to_source_row,
-            map_source_row_to_dest_row,
+            row_id_map_ptr,
             num_rows,
             num_cols,
             stream);
@@ -319,11 +310,10 @@ std::tuple<torch::Tensor, torch::Tensor, std::vector<Tensor>> moe_permute_op(
         dType *original_input_ptr = get_ptr<dType>(original_input);
         dType *permuted_output_ptr = get_ptr<dType>(permuted_output);
 
-        moe_permute_kernel_launcher<dType>(
+        moe_permute_kernel_launcher<dType, true>(
             original_input_ptr,
             permuted_output_ptr,
-            map_dest_row_to_source_row,
-            map_source_row_to_dest_row,
+            row_id_map_ptr,
             num_rows,
             num_cols,
             stream);
@@ -338,11 +328,10 @@ std::tuple<torch::Tensor, torch::Tensor, std::vector<Tensor>> moe_permute_op(
         dType *original_input_ptr = get_ptr<dType>(original_input);
         dType *permuted_output_ptr = get_ptr<dType>(permuted_output);
 
-        moe_permute_kernel_launcher<dType>(
+        moe_permute_kernel_launcher<dType, true>(
             original_input_ptr,
             permuted_output_ptr,
-            map_dest_row_to_source_row,
-            map_source_row_to_dest_row,
+            row_id_map_ptr,
             num_rows,
             num_cols,
             stream);
@@ -357,12 +346,12 @@ std::tuple<torch::Tensor, torch::Tensor, std::vector<Tensor>> moe_permute_op(
     /// Removed to align with pytorch
     // cudaStreamSynchronize(stream);
 
-    return std::make_tuple(permuted_output, source_row_to_dest_row, workspace);
+    return std::make_tuple(permuted_output, row_id_map, workspace);
 }
 
 torch::Tensor moe_recover_op(
     Tensor permuted_input,
-    Tensor source_row_to_dest_row)
+    Tensor row_id_map)
 {
     const int num_rows = permuted_input.size(0);
     const int num_cols = permuted_input.size(1);
@@ -374,7 +363,7 @@ torch::Tensor moe_recover_op(
     Tensor unpermuted_output =
         torch::empty({num_rows, num_cols}, torch::dtype(_st).device(torch::kCUDA).requires_grad(false));
 
-    int *map_source_row_to_dest_row = get_ptr<int>(source_row_to_dest_row);
+    int *row_id_map_ptr = get_ptr<int>(row_id_map);
     auto stream = at::cuda::getCurrentCUDAStream().stream();
 
     switch (_st)
@@ -386,11 +375,10 @@ torch::Tensor moe_recover_op(
         dType *permuted_input_ptr = get_ptr<dType>(permuted_input);
         dType *unpermuted_output_ptr = get_ptr<dType>(unpermuted_output);
 
-        moe_permute_kernel_launcher<dType>(
+        moe_permute_kernel_launcher<dType, false>(
             permuted_input_ptr,
             unpermuted_output_ptr,
-            map_source_row_to_dest_row,
-            nullptr,
+            row_id_map_ptr,
             num_rows,
             num_cols,
             stream);
@@ -404,11 +392,10 @@ torch::Tensor moe_recover_op(
         dType *permuted_input_ptr = get_ptr<dType>(permuted_input);
         dType *unpermuted_output_ptr = get_ptr<dType>(unpermuted_output);
 
-        moe_permute_kernel_launcher<dType>(
+        moe_permute_kernel_launcher<dType, false>(
             permuted_input_ptr,
             unpermuted_output_ptr,
-            map_source_row_to_dest_row,
-            nullptr,
+            row_id_map_ptr,
             num_rows,
             num_cols,
             stream);
@@ -423,11 +410,10 @@ torch::Tensor moe_recover_op(
         dType *permuted_input_ptr = get_ptr<dType>(permuted_input);
         dType *unpermuted_output_ptr = get_ptr<dType>(unpermuted_output);
 
-        moe_permute_kernel_launcher<dType>(
+        moe_permute_kernel_launcher<dType, false>(
             permuted_input_ptr,
             unpermuted_output_ptr,
-            map_source_row_to_dest_row,
-            nullptr,
+            row_id_map_ptr,
             num_rows,
             num_cols,
             stream);

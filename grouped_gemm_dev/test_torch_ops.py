@@ -38,11 +38,9 @@ class TestMoeOps(unittest.TestCase):
     # Prepare inputs
     _1_expert_for_rows = torch.randint(size=(num_rows,),low=0,high=num_experts, dtype=torch.int32).cuda()
     _2_expert_for_rows = torch.randint(size=(num_rows,),low=0,high=num_experts, dtype=torch.int32).cuda()
-    # For debug test, this will get a source_row_to_dest_row of [7, 2, 0, 9, 5, 1, 6, 3, 8, 4]
-    # expert_for_rows = torch.tensor([3, 1, 0, 4, 2, 0, 2, 1, 3, 1])
     unpermuted_inputs = torch.empty(size=(num_rows, num_cols), dtype=dtype).cuda()
     for i in range(num_rows):
-        unpermuted_inputs[i] = i
+        unpermuted_inputs[i] = i % 12345
     unpermuted_inputs.requires_grad_(True)
     original_inputs = unpermuted_inputs.detach()
 
@@ -53,22 +51,22 @@ class TestMoeOps(unittest.TestCase):
       # expert_for_rows = torch.nn.functional.pad(expert_for_rows, [0, 1])
 
       nvtx.range_push("permute op forward")
-      _1_permuted_inputs, _1_source_row_to_dest_row = permute(unpermuted_inputs, _1_expert_for_rows, max_token_num)
+      _1_permuted_inputs, _1_row_id_map = permute(unpermuted_inputs, _1_expert_for_rows, max_token_num)
       nvtx.range_pop()
 
       # shape mismatch test
       # expert_for_rows = torch.nn.functional.pad(expert_for_rows, [0, 1])
 
       nvtx.range_push("unpermute op forward")
-      _1_unpermute_outputs = unpermute(_1_permuted_inputs, _1_expert_for_rows, _1_source_row_to_dest_row, max_token_num)
+      _1_unpermute_outputs = unpermute(_1_permuted_inputs, _1_expert_for_rows, _1_row_id_map, max_token_num)
       nvtx.range_pop()
 
       nvtx.range_push("permute op forward")
-      _2_permuted_inputs, _2_source_row_to_dest_row = permute(_1_unpermute_outputs, _2_expert_for_rows, max_token_num)
+      _2_permuted_inputs, _2_row_id_map = permute(_1_unpermute_outputs, _2_expert_for_rows, max_token_num)
       nvtx.range_pop()
 
       nvtx.range_push("unpermute op forward")
-      _2_unpermute_outputs = unpermute(_2_permuted_inputs, _2_expert_for_rows, _2_source_row_to_dest_row, max_token_num)
+      _2_unpermute_outputs = unpermute(_2_permuted_inputs, _2_expert_for_rows, _2_row_id_map, max_token_num)
       nvtx.range_pop()
 
       # Reset grad to avoid accumulation
@@ -86,11 +84,11 @@ class TestMoeOps(unittest.TestCase):
       print("unpermuted_inputs: {}".format(unpermuted_inputs))
       print("_1_expert_for_rows: {}".format(_1_expert_for_rows))
       print("_1_permuted_inputs: {}".format(_1_permuted_inputs))
-      print("_1_source_row_to_dest_row: {}".format(_1_source_row_to_dest_row))
+      print("_1_row_id_map: {}".format(_1_row_id_map))
       print("_1_unpermute_outputs: {}".format(_1_unpermute_outputs))
       print("_2_expert_for_rows: {}".format(_2_expert_for_rows))
       print("_2_permuted_inputs: {}".format(_2_permuted_inputs))
-      print("_2_source_row_to_dest_row: {}".format(_2_source_row_to_dest_row))
+      print("_2_row_id_map: {}".format(_2_row_id_map))
       print("_2_unpermute_outputs: {}".format(_2_unpermute_outputs))
       print("original_inputs: {}".format(original_inputs))
       print("backward: {}".format(unpermuted_inputs.grad))

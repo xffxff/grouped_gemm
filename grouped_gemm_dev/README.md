@@ -58,10 +58,12 @@ python test_torch_ops.py
 >   max_token_num=0: int) -> tuple
 > ```
 
-The output tuple of `(torch.Tensor, torch.Tensor)` that contains two tensors `permuted_inputs` and `source_row_to_dest_row`.
+The output tuple of `(torch.Tensor, torch.Tensor)` that contains two tensors `permuted_inputs` and `row_id_map`.
 
 * `permuted_inputs` is a view of the original tensor `unpermuted_inputs` with its first dimension permuted according to `expert_for_rows`.
-* `source_row_to_dest_row` is the mapping table for the row indices of the input activations before and after `moe.ops.permute`. For example, given an `expert_for_rows` of `[3, 1, 0, 4, 2, 0, 2, 1, 3, 1]`, the corresponding `source_row_to_dest_row` will be `[7, 2, 0, 9, 5, 1, 6, 3, 8, 4]`.
+* `row_id_map` is the mapping table for the row indices of the input activations before and after `moe.ops.permute`. 
+    &emsp;For example, given an `expert_for_rows` of `[2, 0, 1, 1, 2, 1, 3, 2, 1, 0]`, then it will be permuted to `[0, 0, 1, 1, 1, 1, 2, 2, 2, 3]`.
+    &emsp;The original row indices `[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]` will be changed to `[1, 9, 2, 3, 5, 8, 0, 4, 7, 6]`, which is also the value of `row_id_map`, so that `row_id_map[source_row_id] = dest_row_id`.
 
 ### Parameters
 
@@ -83,7 +85,7 @@ The output tuple of `(torch.Tensor, torch.Tensor)` that contains two tensors `pe
 > moe.ops.unpermute(
 >   permuted_inputs: torch.Tensor,
 >   expert_for_rows: torch.Tensor,
->   source_row_to_dest_row: torch.Tensor,
+>   row_id_map: torch.Tensor,
 >   max_token_num=0: int) -> torch.Tensor
 > ```
 
@@ -99,7 +101,7 @@ The mirror operator of `moe.ops.permute`.
     &emsp;shape = [tokens_num]  
     &emsp;The expert index for each row of original unpermuted activations. The `int32` type is recommended.
 
-* **source_row_to_dest_row** (torch.Tensor)  
+* **row_id_map** (torch.Tensor)  
     &emsp;shape = [tokens_num]  
     &emsp;The mapping table for the row indices of the original unpermuted activations before and after `moe.ops.permute`. The second output tensor of `moe.ops.permute`.
 
@@ -109,32 +111,32 @@ The mirror operator of `moe.ops.permute`.
 ### Example
 
 ```py
-from moe.ops import permute
+from grouped_gemm import permute
 
 expert_for_rows = torch.tensor([2, 0, 1, 0], dtype=torch.int32, device='cuda')
-unpermuted_inputs = torch.tensor([[0,0], [1,1], [2,2], [3,3]], dtype=torch.float16, device='cuda')
-permuted_inputs, source_row_to_dest_row = permute(unpermuted_inputs, expert_for_rows)
-unpermute_outputs = unpermute(permuted_inputs, expert_for_rows, source_row_to_dest_row)
+unpermuted_inputs = torch.tensor([[0,0,0,0], [1,1,1,1], [2,2,2,2], [3,3,3,3]], dtype=torch.float32, device='cuda')
+permuted_inputs, row_id_map = permute(unpermuted_inputs, expert_for_rows)
+unpermute_outputs = unpermute(permuted_inputs, expert_for_rows, row_id_map)
 
-print(source_row_to_dest_row)
+print(row_id_map)
 print(unpermuted_inputs)
 print(permuted_inputs)
 print(unpermute_outputs)
 
 # Output
-# tensor([3, 0, 2, 1], device='cuda:0', dtype=torch.int32)
-# tensor([[0., 0.],
-#         [1., 1.],
-#         [2., 2.],
-#         [3., 3.]], device='cuda:0', dtype=torch.float16)
-# tensor([[1., 1.],
-#         [3., 3.],
-#         [2., 2.],
-#         [0., 0.]], device='cuda:0', dtype=torch.float16)
-# tensor([[0., 0.],
-#         [1., 1.],
-#         [2., 2.],
-#         [3., 3.]], device='cuda:0', dtype=torch.float16)
+# tensor([1, 3, 2, 0], device='cuda:0', dtype=torch.int32)
+# tensor([[0., 0., 0., 0.],
+#         [1., 1., 1., 1.],
+#         [2., 2., 2., 2.],
+#         [3., 3., 3., 3.]], device='cuda:0')
+# tensor([[1., 1., 1., 1.],
+#         [3., 3., 3., 3.],
+#         [2., 2., 2., 2.],
+#         [0., 0., 0., 0.]], device='cuda:0')
+# tensor([[0., 0., 0., 0.],
+#         [1., 1., 1., 1.],
+#         [2., 2., 2., 2.],
+#         [3., 3., 3., 3.]], device='cuda:0')
 ```
 
 ## groupedgemm
