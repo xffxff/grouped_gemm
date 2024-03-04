@@ -125,10 +125,13 @@ void generic_moe_gemm_backward_kernelLauncher(
                                         LayoutB,
                                         LayoutC>(problem_desc, num_experts,
                                                  gemm_m, gemm_n, gemm_k_per_expert,
-                                                 ptr_A, ptr_B, ptr_C);
+                                                 ptr_A, ptr_B, ptr_C, stream);
 
     std::vector<cutlass::gemm::GemmCoord> host_problem_sizes(num_experts);
-    cutlass::device_memory::copy_to_host(host_problem_sizes.data(), problem_desc.problem_sizes, num_experts);
+    cudaMemcpyAsync(host_problem_sizes.data(), problem_desc.problem_sizes, 
+                    num_experts * sizeof(cutlass::gemm::GemmCoord),
+                    cudaMemcpyDeviceToHost,
+                    stream);
 
     int threadblock_count = GemmGrouped::sufficient(host_problem_sizes.data(), num_experts);
     if (!threadblock_count)

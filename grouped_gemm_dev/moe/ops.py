@@ -43,7 +43,7 @@ class PermuteMoE(torch.autograd.Function):
 
     # Data type check
     if expert_for_rows.dtype != torch.int32:
-      print("[Warning] The data type of the input \"expert_for_rows\" of permute op is Int64! "
+      print("[Warning] The data type of the input \"expert_for_rows\" of permute op is int64! "
             "The recommended type is int32.", file=stderr)
       expert_for_rows = expert_for_rows.to(torch.int32)
 
@@ -124,11 +124,11 @@ class UnpermuteMoE(torch.autograd.Function):
 
     # Data type check
     if expert_for_rows.dtype != torch.int32:
-      print("[Warning] The data type of the input \"expert_for_rows\" of unpermute op is Int64! "
+      print("[Warning] The data type of the input \"expert_for_rows\" of unpermute op is int64! "
             "The recommended type is int32.", file=stderr)
       expert_for_rows = expert_for_rows.to(torch.int32)
     if row_id_map.dtype != torch.int32:
-      print("[Warning] The data type of the input \"row_id_map\" of unpermute op is Int64! "
+      print("[Warning] The data type of the input \"row_id_map\" of unpermute op is int64! "
             "The recommended type is int32.", file=stderr)
       row_id_map = row_id_map.to(torch.int32)
 
@@ -187,35 +187,40 @@ class GroupedGemmMoE(torch.autograd.Function):
   @staticmethod
   def forward(ctx,
               permuted_inputs: torch.Tensor,
-              weights: torch.Tensor,
               tokens_per_expert: torch.Tensor,
-              transB: bool):
+              transB: bool,
+              *weights_list):
+
+    # Weight matrices num check
+    if len(weights_list) != tokens_per_expert.size(0):
+      raise RuntimeError(f"[Error] groupedgemm op input \"weights_list\" matrices num mismatch! "
+                         f"Expect ({tokens_per_expert.size(0)}), but got ({len(weights_list)}).")
 
     # Device check
     if permuted_inputs.is_cpu:
       raise RuntimeError("[Error] The input \"permuted_inputs\" of groupedgemm op is on the device: CPU!")
-    if weights.is_cpu:
-      raise RuntimeError("[Error] The input \"weights\" of groupedgemm op is on the device: CPU!")
+    if weights_list[0].is_cpu:
+      raise RuntimeError("[Error] The input \"weights_list\" of groupedgemm op is on the device: CPU!")
     if tokens_per_expert.is_cpu:
       print("[Warning] The input \"tokens_per_expert\" of groupedgemm op is on the device: CPU!", file=stderr)
       tokens_per_expert = tokens_per_expert.cuda()
 
     # Shape check
     if not transB:
-      if permuted_inputs.size(1) != weights.size(1):
-        raise RuntimeError(f"[Error] groupedgemm op input \"weights\" shape mismatch! "
-                           f"Expect {permuted_inputs.size(1)}, but got {weights.size(1)}.")
+      if permuted_inputs.size(1) != weights_list[0].size(0):
+        raise RuntimeError(f"[Error] groupedgemm op input \"weights_list\" shape mismatch! "
+                           f"Expect ({permuted_inputs.size(1)}), but got ({weights_list[0].size(0)}).")
     else:
-      if permuted_inputs.size(1) != weights.size(2):
-        raise RuntimeError(f"[Error] groupedgemm op input \"weights\" shape mismatch! "
-                           f"Expect {permuted_inputs.size(1)}, but got {weights.size(2)}.")
+      if permuted_inputs.size(1) != weights_list[0].size(1):
+        raise RuntimeError(f"[Error] groupedgemm op input \"weights_list\" shape mismatch! "
+                           f"Expect ({permuted_inputs.size(1)}), but got ({weights_list[0].size(1)}).")
 
     # Data type check
-    if permuted_inputs.dtype != weights.dtype:
+    if permuted_inputs.dtype != weights_list[0].dtype:
       raise RuntimeError(f"[Error] groupedgemm op input data type mismatch! "
-                         f"\"permuted_inputs\": {permuted_inputs.dtype}, \"weights\": {weights.dtype}.")
+                         f"\"permuted_inputs\": {permuted_inputs.dtype}, \"weights_list\": {weights_list[0].dtype}.")
     if tokens_per_expert.dtype != torch.int32:
-      print("[Warning] The data type of the input \"tokens_per_expert\" of groupedgemm op is Int64! "
+      print("[Warning] The data type of the input \"tokens_per_expert\" of groupedgemm op is int64! "
             "The recommended type is int32.", file=stderr)
       tokens_per_expert = tokens_per_expert.to(torch.int32)
 
@@ -223,27 +228,29 @@ class GroupedGemmMoE(torch.autograd.Function):
     if not permuted_inputs.is_contiguous():
       print("[Warning] The input \"permuted_inputs\" of groupedgemm op is discontiguous!", file=stderr)
       permuted_inputs = permuted_inputs.contiguous()
-    if not weights.is_contiguous():
-      print("[Warning] The input \"weights\" of groupedgemm op is discontiguous!", file=stderr)
-      weights = weights.contiguous()
+    if not weights_list[0].is_contiguous():
+      print("[Warning] The input \"weights_list\" of groupedgemm op is discontiguous!", file=stderr)
+      for w in weights_list:
+        w = w.contiguous()
 
     output = torch.ops.moe_unit_ops.moe_group_gemm_op(
       permuted_inputs,
-      weights,
+      weights_list,
       tokens_per_expert,
       transB)
     
-    ctx.save_for_backward(permuted_inputs, tokens_per_expert, weights)
+    ctx.save_for_backward(permuted_inputs, tokens_per_expert)
     ctx.transB = transB
+    ctx.weights_list = weights_list
 
     return output
 
 
   @staticmethod
   def backward(ctx, permuted_inputs_grad):
-      
-    permuted_inputs, tokens_per_expert, weights = ctx.saved_tensors
+    permuted_inputs, tokens_per_expert = ctx.saved_tensors
     transB = ctx.transB
+    weights_list = ctx.weights_list
 
     if not permuted_inputs_grad.is_contiguous():
       permuted_inputs_grad = permuted_inputs_grad.contiguous()
@@ -252,19 +259,23 @@ class GroupedGemmMoE(torch.autograd.Function):
     if ctx.needs_input_grad[0]:
       activation_grad = torch.ops.moe_unit_ops.moe_group_gemm_op(
         permuted_inputs_grad,
-        weights,
+        weights_list,
         tokens_per_expert,
         not transB)
       
     weight_grad = None
-    if ctx.needs_input_grad[1]:
+    if ctx.needs_input_grad[3]:
       weight_grad = torch.ops.moe_unit_ops.moe_group_gemm_backward_op(
         permuted_inputs,
         permuted_inputs_grad,
         tokens_per_expert,
         transB)
 
-    return activation_grad, weight_grad, None, None
+    weight_grad_list = []
+    for i in range(weight_grad.shape[0]):
+      weight_grad_list.append(weight_grad[i])
+
+    return activation_grad, None, None, *weight_grad_list
 
 ################################################################################################
 ##
@@ -278,8 +289,8 @@ def permute(unpermuted_inputs, expert_for_rows, max_token_num=0):
 def unpermute(permuted_inputs, expert_for_rows, row_id_map, max_token_num=0):
   return UnpermuteMoE.apply(permuted_inputs, expert_for_rows, row_id_map, max_token_num)
 
-def groupedgemm(permuted_inputs, weights, tokens_per_expert, transB=False):
-  return GroupedGemmMoE.apply(permuted_inputs, weights, tokens_per_expert, transB)
+def groupedgemm(permuted_inputs, tokens_per_expert, transB=False, *weights_list):
+  return GroupedGemmMoE.apply(permuted_inputs, tokens_per_expert, transB, *weights_list)
 
 def sinkhorn_kernel(cost, tol=0.0001):
     return torch.ops.moe_unit_ops.sinkhorn(cost, tol)

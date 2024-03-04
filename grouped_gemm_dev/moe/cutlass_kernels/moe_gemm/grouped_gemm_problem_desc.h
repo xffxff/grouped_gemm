@@ -119,7 +119,6 @@ __global__ void setGroupedGemmProblemDesc(
     int64_t gemm_n,
     int64_t gemm_k,
     ElementA *ptr_A,
-    ElementB *ptr_B,
     ElementC *ptr_C)
 {
     // Specialize BlockScan for a 1D block of 128 threads of type int
@@ -136,16 +135,13 @@ __global__ void setGroupedGemmProblemDesc(
     problem_desc.device_ldc[expert_id] = LayoutC::packed({gemm_m, gemm_n}).stride(0);
 
     int64_t stride_A = gemm_m * gemm_k;
-    int64_t stride_B = gemm_k * gemm_n;
     int64_t stride_C = gemm_m * gemm_n;
 
     // Collectively compute the block-wide exclusive prefix sum
     BlockScan(temp_storage).ExclusiveSum(stride_A, stride_A);
-    BlockScan(temp_storage).ExclusiveSum(stride_B, stride_B);
     BlockScan(temp_storage).ExclusiveSum(stride_C, stride_C);
 
     problem_desc.device_ptr_A[expert_id] = ptr_A + stride_A;
-    problem_desc.device_ptr_B[expert_id] = ptr_B + stride_B;
     problem_desc.device_ptr_C[expert_id] = ptr_C + stride_C;
 }
 
@@ -164,7 +160,8 @@ void setGroupedGemmProblemDescFromDevice(
     int *gemm_k_per_expert,
     ElementA *ptr_A,
     ElementB *ptr_B,
-    ElementC *ptr_C)
+    ElementC *ptr_C,
+    cudaStream_t stream)
 {
     if (num_experts > NUM_EXPERTS)
     {
@@ -176,9 +173,10 @@ void setGroupedGemmProblemDescFromDevice(
                               ElementC,
                               LayoutA,
                               LayoutB,
-                              LayoutC><<<1, num_experts>>>(problem_desc,
-                                                           gemm_m, gemm_n, gemm_k_per_expert,
-                                                           ptr_A, ptr_B, ptr_C);
+                              LayoutC><<<1, num_experts, 0, stream>>>(
+                                    problem_desc,
+                                    gemm_m, gemm_n, gemm_k_per_expert,
+                                    ptr_A, ptr_B, ptr_C);
 }
 
 // For Variable M
@@ -195,8 +193,8 @@ void setGroupedGemmProblemDescFromDevice(
     int64_t gemm_n,
     int64_t gemm_k,
     ElementA *ptr_A,
-    ElementB *ptr_B,
-    ElementC *ptr_C)
+    ElementC *ptr_C,
+    cudaStream_t stream)
 {
     if (num_experts > NUM_EXPERTS)
     {
@@ -208,7 +206,8 @@ void setGroupedGemmProblemDescFromDevice(
                               ElementC,
                               LayoutA,
                               LayoutB,
-                              LayoutC><<<1, num_experts>>>(problem_desc,
-                                                           gemm_m_per_expert, gemm_n, gemm_k,
-                                                           ptr_A, ptr_B, ptr_C);
+                              LayoutC><<<1, num_experts, 0, stream>>>(
+                                    problem_desc,
+                                    gemm_m_per_expert, gemm_n, gemm_k,
+                                    ptr_A, ptr_C);
 }

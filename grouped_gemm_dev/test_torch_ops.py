@@ -124,13 +124,17 @@ class TestMoeOps(unittest.TestCase):
     tokens_per_expert = tokens_per_expert.to(torch.int32)
 
     permuted_inputs = torch.empty([num_rows, hidden_size], dtype=dtype, device="cuda").normal_(rand_mean, rand_std)
-    if not transB:
-      weights = torch.empty([num_experts, hidden_size, inter_size], dtype=dtype, device="cuda").normal_(rand_mean, rand_std)    
-    else:
-      weights = torch.empty([num_experts, inter_size, hidden_size], dtype=dtype, device="cuda").normal_(rand_mean, rand_std)    
-    
+
+    weights_list = []
+    for i in range(num_experts):
+      if not transB:
+        weights = torch.empty([hidden_size, inter_size], dtype=dtype, device="cuda").normal_(rand_mean, rand_std)    
+      else:
+        weights = torch.empty([inter_size, hidden_size], dtype=dtype, device="cuda").normal_(rand_mean, rand_std)    
+      weights_list.append(weights.detach())
+      weights_list[i].requires_grad_(True)
+
     permuted_inputs.requires_grad_(True)
-    weights.requires_grad_(True)
 
     # Build network
     for _ in range(execution_times):
@@ -140,17 +144,23 @@ class TestMoeOps(unittest.TestCase):
       # shape mismatch test
       # weights = torch.nn.functional.pad(weights, [0, 0, 0, 1])
 
-      gemm_output = groupedgemm(permuted_inputs, weights, tokens_per_expert, transB)
+      gemm_output = groupedgemm(permuted_inputs, tokens_per_expert, transB, *weights_list)
       nvtx.range_pop()
 
       # Reset grad to avoid accumulation
       permuted_inputs.grad = torch.zeros_like(permuted_inputs)
-      weights.grad = torch.zeros_like(weights)
+      for weights in weights_list:
+        weights.grad = torch.zeros_like(weights)
 
       # Backward
       nvtx.range_push("grouped gemm op backward")
       gemm_output.backward(gemm_output.detach())
       nvtx.range_pop()
+
+    weights_grad = []
+    for weights in weights_list:
+        weights_grad.append(weights.grad)
+    weights_grad = torch.cat(weights_grad)
 
     # Ref calculation
     gemm_output_ref_list = []
@@ -165,7 +175,7 @@ class TestMoeOps(unittest.TestCase):
       row_end_id = row_start_id + tokens_per_expert[expert_id]
 
       activations_expert = permuted_inputs[row_start_id:row_end_id].detach()
-      weights_expert = weights[expert_id].detach()
+      weights_expert = weights_list[expert_id].detach()
       if transB:
         weights_expert = weights_expert.T
       activations_expert.requires_grad_(True)
@@ -188,13 +198,13 @@ class TestMoeOps(unittest.TestCase):
     if PRINT:
       print(expert_for_rows)
       # Forward
-      print(gemm_output)
-      print(gemm_output_ref)
+      print("    gemm output: ", gemm_output)
+      print("ref gemm output: ", gemm_output_ref)
       # Backward
-      print(permuted_inputs.grad)
-      print(activation_grad_ref)
-      print(weights.grad)
-      print(weight_grad_ref)
+      print("    act grad: ", permuted_inputs.grad)
+      print("ref act grad: ", activation_grad_ref)
+      print("    weight grad: ", weights_grad)
+      print("ref weight grad: ", weight_grad_ref)
 
     # Result check
     gemm_output = gemm_output.float().cpu().detach().numpy().flatten()
@@ -209,7 +219,7 @@ class TestMoeOps(unittest.TestCase):
     print(f"group gemm backward activation.grad max error: \t{max_abs_error:.3e} ({dtype})")
     assert (max_abs_error < atol), "test_moe_groupedgemm failed!"
 
-    gemm_output = weights.grad.float().cpu().detach().numpy().flatten()
+    gemm_output = weights_grad.float().cpu().detach().numpy().flatten()
     gemm_output_ref = weight_grad_ref.float().cpu().detach().numpy().flatten()
     max_abs_error = abs(gemm_output - gemm_output_ref).max()
     print(f"group gemm backward weight.grad max error: \t{max_abs_error:.3e} ({dtype})")

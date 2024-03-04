@@ -27,7 +27,7 @@ public:
     }
 
     void moe_gemm(T*           A,
-                  WeightType*  B,
+                  WeightType** B_list,
                   T*           C,
                   int*         gemm_m_per_expert,
                   int64_t      gemm_n,
@@ -51,7 +51,7 @@ public:
 private:
     template<bool TransB /* Whether to transpose weights */>
     void dispatch_to_arch(T*                A,
-                          WeightType*       B,
+                          WeightType**      B_list,
                           T*                C,
                           int*              gemm_m_per_expert,
                           int64_t           gemm_n,
@@ -63,7 +63,7 @@ private:
 
     template<bool TransB /* Whether to transpose weights */>
     void run_gemm(T*           A,
-                  WeightType*  B,
+                  WeightType** B_list,
                   T*           C,
                   int*         gemm_m_per_expert,
                   int64_t      gemm_n,

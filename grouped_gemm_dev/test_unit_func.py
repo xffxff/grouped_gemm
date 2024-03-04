@@ -215,10 +215,14 @@ class TestMoe(unittest.TestCase):
     # Cast from int64 to int32 to meet the kernel's requirement.
     rows_per_expert = rows_per_expert.to(torch.int32)
 
+    weights_list = []
+    for i in range(num_experts):
+      weights_list.append(input_dict["fc1_expert_weights_for_ft"][i])
+
     nvtx.range_push("forward cutlass grouped gemm")
     gemm1_output = self.moe_group_gemm_op(
         permuted_inputs,
-        input_dict["fc1_expert_weights_for_ft"],
+        weights_list,
         rows_per_expert,
         False
     )

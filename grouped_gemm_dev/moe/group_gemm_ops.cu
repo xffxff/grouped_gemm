@@ -33,15 +33,15 @@ namespace groupedgemmformoe {
 
 // act type, weight type
 template <typename T, typename WeightType>
-Tensor run_group_gemm_helper(Tensor    input_activations,
-                             Tensor    fc1_expert_weights,
-                             Tensor    tokens_per_expert,
-                             bool      transB)
+Tensor run_group_gemm_helper(Tensor              input_activations,
+                             std::vector<Tensor> fc1_expert_weights_list,
+                             Tensor              tokens_per_expert,
+                             bool                transB)
 {
     const int gemm_m = input_activations.size(0);
     int gemm_n;
-    if (transB) gemm_n = fc1_expert_weights.size(1);
-    else gemm_n = fc1_expert_weights.size(2);
+    if (transB) gemm_n = fc1_expert_weights_list[0].size(0);
+    else gemm_n = fc1_expert_weights_list[0].size(1);
     const int gemm_k = input_activations.size(1);
     const int num_experts = tokens_per_expert.size(0);
 
@@ -55,7 +55,11 @@ Tensor run_group_gemm_helper(Tensor    input_activations,
     int *tokens_per_expert_ptr = get_ptr<int>(tokens_per_expert);
 
     T *input_act_ptr = get_ptr<T>(input_activations);
-    WeightType *fc1_expert_weights_ptr = get_ptr<WeightType>(fc1_expert_weights);
+    WeightType *fc1_expert_weights_ptr_list[num_experts];
+    for (size_t i = 0; i < num_experts; i++)
+    {
+        fc1_expert_weights_ptr_list[i] = get_ptr<WeightType>(fc1_expert_weights_list[i]);
+    }
 
     const at::ScalarType _st = input_activations.scalar_type();
     auto fc1_output =
@@ -65,7 +69,7 @@ Tensor run_group_gemm_helper(Tensor    input_activations,
     groupedgemmformoe::MoeGemmRunner<T, WeightType> moe_gemm_runner_;
 
     moe_gemm_runner_.moe_gemm(input_act_ptr,
-                              fc1_expert_weights_ptr,
+                              fc1_expert_weights_ptr_list,
                               fc1_output_ptr,
                               tokens_per_expert_ptr, // gemm_m
                               gemm_n,                // gemm_n
@@ -140,10 +144,10 @@ Tensor run_group_gemm_backward_helper(Tensor input_activations,
 //
 /////////////////////////////////////////////////////////////////////////////////////////////////
 
-Tensor moe_group_gemm_op(Tensor  input_activations,
-                         Tensor  fc1_expert_weights,
-                         Tensor  tokens_per_expert,
-                         bool    transB)
+Tensor moe_group_gemm_op(Tensor              input_activations,
+                         std::vector<Tensor> fc1_expert_weights_list,
+                         Tensor              tokens_per_expert,
+                         bool                transB)
 {
     Tensor output_tensor;
 
@@ -153,7 +157,7 @@ Tensor moe_group_gemm_op(Tensor  input_activations,
         case at::ScalarType::Float: {
             output_tensor = run_group_gemm_helper<float, float>(
                 input_activations,
-                fc1_expert_weights,
+                fc1_expert_weights_list,
                 tokens_per_expert,
                 transB);
             break;
@@ -161,7 +165,7 @@ Tensor moe_group_gemm_op(Tensor  input_activations,
         case at::ScalarType::Half: {
             output_tensor = run_group_gemm_helper<half, half>(
                 input_activations,
-                fc1_expert_weights,
+                fc1_expert_weights_list,
                 tokens_per_expert,
                 transB);
             break;
@@ -170,7 +174,7 @@ Tensor moe_group_gemm_op(Tensor  input_activations,
         case at::ScalarType::BFloat16: {
             output_tensor = run_group_gemm_helper<__nv_bfloat16, __nv_bfloat16>(
                 input_activations,
-                fc1_expert_weights,
+                fc1_expert_weights_list,
                 tokens_per_expert,
                 transB);
             break;

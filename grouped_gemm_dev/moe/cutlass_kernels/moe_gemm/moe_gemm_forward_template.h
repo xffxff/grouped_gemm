@@ -33,7 +33,7 @@ template<typename T,
          typename WarpShape,
          int      Stages>
 void generic_moe_gemm_kernelLauncher(T*             A,
-                                     WeightType*    B,
+                                     WeightType**   B_list,
                                      T*             C,
                                      int*           gemm_m_per_expert,
                                      int64_t        gemm_n,
@@ -113,10 +113,14 @@ void generic_moe_gemm_kernelLauncher(T*             A,
     }
 
     ElementA *ptr_A = reinterpret_cast<ElementA *>(A);
-    ElementB *ptr_B = reinterpret_cast<ElementB *>(B);
+    ElementB **ptr_B_list = reinterpret_cast<ElementB **>(B_list);
     ElementC *ptr_C = reinterpret_cast<ElementC *>(C);
 
     GroupedGemmProblemDesc<ElementA, ElementB, ElementC> problem_desc(num_experts);
+    cudaMemcpyAsync(problem_desc.device_ptr_B, ptr_B_list, 
+                    num_experts * sizeof(ElementB *),
+                    cudaMemcpyHostToDevice,
+                    stream);
     setGroupedGemmProblemDescFromDevice<ElementA,
                                         ElementB,
                                         ElementC,
@@ -124,10 +128,13 @@ void generic_moe_gemm_kernelLauncher(T*             A,
                                         LayoutB,
                                         LayoutC>(problem_desc, num_experts,
                                                  gemm_m_per_expert, gemm_n, gemm_k,
-                                                 ptr_A, ptr_B, ptr_C);
+                                                 ptr_A, ptr_C, stream);
 
     std::vector<cutlass::gemm::GemmCoord> host_problem_sizes(num_experts);
-    cutlass::device_memory::copy_to_host(host_problem_sizes.data(), problem_desc.problem_sizes, num_experts);
+    cudaMemcpyAsync(host_problem_sizes.data(), problem_desc.problem_sizes, 
+                    num_experts * sizeof(cutlass::gemm::GemmCoord),
+                    cudaMemcpyDeviceToHost,
+                    stream);
 
     int threadblock_count = GemmGrouped::sufficient(host_problem_sizes.data(), num_experts);
     if (!threadblock_count)
@@ -193,7 +200,7 @@ template<typename T,
             std::is_same<arch, cutlass::arch::Sm80>::value>::type* = nullptr>
 void dispatch_gemm_config(
     T*                A,
-    WeightType*       B,
+    WeightType**      B_list,
     T*                C,
     int*              gemm_m_per_expert,
     int64_t           gemm_n,
@@ -212,7 +219,7 @@ void dispatch_gemm_config(
                                             ThreadblockShape,
                                             WarpShape,
                                             2>(A,
-                                               B,
+                                               B_list,
                                                C,
                                                gemm_m_per_expert,
                                                gemm_n,
@@ -229,7 +236,7 @@ void dispatch_gemm_config(
                                             ThreadblockShape,
                                             WarpShape,
                                             3>(A,
-                                               B,
+                                               B_list,
                                                C,
                                                gemm_m_per_expert,
                                                gemm_n,
@@ -246,7 +253,7 @@ void dispatch_gemm_config(
                                             ThreadblockShape,
                                             WarpShape,
                                             7>(A,
-                                               B,
+                                               B_list,
                                                C,
                                                gemm_m_per_expert,
                                                gemm_n,
@@ -281,7 +288,7 @@ template<typename T,
             !std::is_same<T, __nv_bfloat16>::value>::type* = nullptr>
 void dispatch_gemm_config(
     T*                A,
-    WeightType*       B,
+    WeightType**      B_list,
     T*                C,
     int*              gemm_m_per_expert,
     int64_t           gemm_n,
@@ -300,7 +307,7 @@ void dispatch_gemm_config(
                                             ThreadblockShape,
                                             WarpShape,
                                             2>(A,
-                                               B,
+                                               B_list,
                                                C,
                                                gemm_m_per_expert,
                                                gemm_n,
@@ -335,7 +342,7 @@ template<typename T,
             std::is_same<T, __nv_bfloat16>::value>::type* = nullptr>
 void dispatch_gemm_config(
     T*                A,
-    WeightType*       B,
+    WeightType**      B_list,
     T*                C,
     int*              gemm_m_per_expert,
     int64_t           gemm_n,
@@ -366,7 +373,7 @@ template<typename T,
             !std::is_same<T, float>::value && 
             std::is_same<T, WeightType>::value>::type* = nullptr>
 void dispatch_moe_gemm_to_cutlass(T*                A,
-                                  WeightType*       B,
+                                  WeightType**      B_list,
                                   T*                C,
                                   int*              gemm_m_per_expert,
                                   int64_t           gemm_n,
@@ -381,7 +388,7 @@ void dispatch_moe_gemm_to_cutlass(T*                A,
             dispatch_gemm_config<T, WeightType, TransB, arch,
                                  cutlass::gemm::GemmShape<128, 128, 32>,
                                  cutlass::gemm::GemmShape<64, 64, 32>>(A,
-                                                                       B,
+                                                                       B_list,
                                                                        C,
                                                                        gemm_m_per_expert,
                                                                        gemm_n,
@@ -414,7 +421,7 @@ template<typename T,
             std::is_same<T, float>::value &&
             std::is_same<T, WeightType>::value>::type * = nullptr>
 void dispatch_moe_gemm_to_cutlass(T*                A,
-                                  WeightType*       B,
+                                  WeightType**      B_list,
                                   T*                C,
                                   int*              gemm_m_per_expert,
                                   int64_t           gemm_n,
@@ -429,7 +436,7 @@ void dispatch_moe_gemm_to_cutlass(T*                A,
             dispatch_gemm_config<T, WeightType, TransB, arch,
                                  cutlass::gemm::GemmShape<128, 128, 8>,
                                  cutlass::gemm::GemmShape<64, 64, 8>>(A,
-                                                                      B,
+                                                                      B_list,
                                                                       C,
                                                                       gemm_m_per_expert,
                                                                       gemm_n,
@@ -456,7 +463,7 @@ template<typename T,
          typename WeightType>
 template<bool     TransB>
 void MoeGemmRunner<T, WeightType>::dispatch_to_arch(T*                A,
-                                                    WeightType*       B,
+                                                    WeightType**      B_list,
                                                     T*                C,
                                                     int*              gemm_m_per_expert,
                                                     int64_t           gemm_n,
@@ -469,7 +476,7 @@ void MoeGemmRunner<T, WeightType>::dispatch_to_arch(T*                A,
     if (sm_ >= 70 && sm_ < 75) {
 #ifdef ARCH_70
         dispatch_moe_gemm_to_cutlass<T, WeightType, TransB, cutlass::arch::Sm70>(A,
-                                                                                 B,
+                                                                                 B_list,
                                                                                  C,
                                                                                  gemm_m_per_expert,
                                                                                  gemm_n,
@@ -483,7 +490,7 @@ void MoeGemmRunner<T, WeightType>::dispatch_to_arch(T*                A,
     else if (sm_ >= 75 && sm_ < 80) {
 #ifdef ARCH_75
         dispatch_moe_gemm_to_cutlass<T, WeightType, TransB, cutlass::arch::Sm75>(A,
-                                                                                 B,
+                                                                                 B_list,
                                                                                  C,
                                                                                  gemm_m_per_expert,
                                                                                  gemm_n,
@@ -497,7 +504,7 @@ void MoeGemmRunner<T, WeightType>::dispatch_to_arch(T*                A,
     else if (sm_ >= 80 && sm_ <= 90) {
 #ifdef ARCH_80
         dispatch_moe_gemm_to_cutlass<T, WeightType, TransB, cutlass::arch::Sm80>(A,
-                                                                                 B,
+                                                                                 B_list,
                                                                                  C,
                                                                                  gemm_m_per_expert,
                                                                                  gemm_n,
@@ -523,7 +530,7 @@ template<typename T,
          typename WeightType>         
 template<bool     TransB>
 void MoeGemmRunner<T, WeightType>::run_gemm(T*           A,
-                                            WeightType*  B,
+                                            WeightType** B_list,
                                             T*           C,
                                             int*         gemm_m_per_expert,
                                             int64_t      gemm_n,
@@ -550,7 +557,7 @@ void MoeGemmRunner<T, WeightType>::run_gemm(T*           A,
         chosen_config.stages = 2;
 
     dispatch_to_arch<TransB>(A,
-                             B,
+                             B_list,
                              C,
                              gemm_m_per_expert,
                              gemm_n,
@@ -568,7 +575,7 @@ void MoeGemmRunner<T, WeightType>::run_gemm(T*           A,
 
 template<typename T, typename WeightType>
 void MoeGemmRunner<T, WeightType>::moe_gemm(T*           A,
-                                            WeightType*  B,
+                                            WeightType** B_list,
                                             T*           C,
                                             int*         gemm_m_per_expert,
                                             int64_t      gemm_n,
@@ -581,12 +588,12 @@ void MoeGemmRunner<T, WeightType>::moe_gemm(T*           A,
     if (transB)
     {
         run_gemm<true>(
-            A, B, C, gemm_m_per_expert, gemm_n, gemm_k, num_tokens, num_experts, stream);
+            A, B_list, C, gemm_m_per_expert, gemm_n, gemm_k, num_tokens, num_experts, stream);
     }
     else
     {
         run_gemm<false>(
-            A, B, C, gemm_m_per_expert, gemm_n, gemm_k, num_tokens, num_experts, stream);
+            A, B_list, C, gemm_m_per_expert, gemm_n, gemm_k, num_tokens, num_experts, stream);
     }
 }
 
