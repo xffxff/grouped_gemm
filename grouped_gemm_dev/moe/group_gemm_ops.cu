@@ -297,7 +297,7 @@ std::tuple<torch::Tensor, torch::Tensor, std::vector<Tensor>> moe_permute_op(
         dType *original_input_ptr = get_ptr<dType>(original_input);
         dType *permuted_output_ptr = get_ptr<dType>(permuted_output);
 
-        moe_permute_kernel_launcher<dType, true>(
+        moe_permute_kernel_launcher<dType, true, 4>(
             original_input_ptr,
             permuted_output_ptr,
             row_id_map_ptr,
@@ -314,7 +314,7 @@ std::tuple<torch::Tensor, torch::Tensor, std::vector<Tensor>> moe_permute_op(
         dType *original_input_ptr = get_ptr<dType>(original_input);
         dType *permuted_output_ptr = get_ptr<dType>(permuted_output);
 
-        moe_permute_kernel_launcher<dType, true>(
+        moe_permute_kernel_launcher<dType, true, 8>(
             original_input_ptr,
             permuted_output_ptr,
             row_id_map_ptr,
@@ -332,7 +332,7 @@ std::tuple<torch::Tensor, torch::Tensor, std::vector<Tensor>> moe_permute_op(
         dType *original_input_ptr = get_ptr<dType>(original_input);
         dType *permuted_output_ptr = get_ptr<dType>(permuted_output);
 
-        moe_permute_kernel_launcher<dType, true>(
+        moe_permute_kernel_launcher<dType, true, 8>(
             original_input_ptr,
             permuted_output_ptr,
             row_id_map_ptr,
@@ -379,7 +379,7 @@ torch::Tensor moe_recover_op(
         dType *permuted_input_ptr = get_ptr<dType>(permuted_input);
         dType *unpermuted_output_ptr = get_ptr<dType>(unpermuted_output);
 
-        moe_permute_kernel_launcher<dType, false>(
+        moe_permute_kernel_launcher<dType, false, 4>(
             permuted_input_ptr,
             unpermuted_output_ptr,
             row_id_map_ptr,
@@ -396,7 +396,7 @@ torch::Tensor moe_recover_op(
         dType *permuted_input_ptr = get_ptr<dType>(permuted_input);
         dType *unpermuted_output_ptr = get_ptr<dType>(unpermuted_output);
 
-        moe_permute_kernel_launcher<dType, false>(
+        moe_permute_kernel_launcher<dType, false, 8>(
             permuted_input_ptr,
             unpermuted_output_ptr,
             row_id_map_ptr,
@@ -414,7 +414,7 @@ torch::Tensor moe_recover_op(
         dType *permuted_input_ptr = get_ptr<dType>(permuted_input);
         dType *unpermuted_output_ptr = get_ptr<dType>(unpermuted_output);
 
-        moe_permute_kernel_launcher<dType, false>(
+        moe_permute_kernel_launcher<dType, false, 8>(
             permuted_input_ptr,
             unpermuted_output_ptr,
             row_id_map_ptr,

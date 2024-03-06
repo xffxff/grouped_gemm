@@ -9,7 +9,7 @@
 #include "cutlass/arch/memory.h"
 #include "cutlass/arch/cache_operation.h"
 
-template <typename T>
+template <typename T, int kElementsPerAccess>
 __global__ void moe_permute_kernel(const T *original_input,
                                    T *permuted_output,
                                    const int *row_id_map,
@@ -26,7 +26,6 @@ __global__ void moe_permute_kernel(const T *original_input,
     int source_row = row_id_map[dest_row];
 
     // permute activations rows based on experts
-    const int kElementsPerAccess = 16 / sizeof(T);
     const T *source_row_ptr = original_input + source_row * num_cols;
     T *dest_row_ptr = permuted_output + dest_row * num_cols;
 
@@ -37,7 +36,7 @@ __global__ void moe_permute_kernel(const T *original_input,
     }
 }
 
-template <typename T>
+template <typename T, int kElementsPerAccess>
 __global__ void moe_recover_kernel(const T *original_input,
                                    T *permuted_output,
                                    const int *row_id_map,
@@ -54,7 +53,6 @@ __global__ void moe_recover_kernel(const T *original_input,
     int dest_row = row_id_map[source_row];
 
     // permute activations rows based on experts
-    const int kElementsPerAccess = 16 / sizeof(T);
     const T *source_row_ptr = original_input + source_row * num_cols;
     T *dest_row_ptr = permuted_output + dest_row * num_cols;
 
@@ -65,7 +63,7 @@ __global__ void moe_recover_kernel(const T *original_input,
     }
 }
 
-template <typename T, bool FWD>
+template <typename T, bool FWD, int kElementsPerAccess>
 void moe_permute_kernel_launcher(
     const T *original_input,
     T *permuted_output,
@@ -74,23 +72,26 @@ void moe_permute_kernel_launcher(
     const int num_cols,
     cudaStream_t stream)
 {
+    if (num_cols & 0x7 != 0)
+        throw std::runtime_error("num_cols of input activations must be multiples of 8.");
+
     const int blocks = num_rows;
-    const int threads = std::min(num_cols, 1024);
+    const int threads = std::min(num_cols / kElementsPerAccess, 1024);
 
     if (FWD)
     {
-        moe_permute_kernel<T><<<blocks, threads, 0, stream>>>(original_input,
-                                                              permuted_output,
-                                                              row_id_map,
-                                                              num_rows,
-                                                              num_cols);
+        moe_permute_kernel<T, kElementsPerAccess><<<blocks, threads, 0, stream>>>(original_input,
+                                                                                  permuted_output,
+                                                                                  row_id_map,
+                                                                                  num_rows,
+                                                                                  num_cols);
     }
     else
     {
-        moe_recover_kernel<T><<<blocks, threads, 0, stream>>>(original_input,
-                                                              permuted_output,
-                                                              row_id_map,
-                                                              num_rows,
-                                                              num_cols);
+        moe_recover_kernel<T, kElementsPerAccess><<<blocks, threads, 0, stream>>>(original_input,
+                                                                                  permuted_output,
+                                                                                  row_id_map,
+                                                                                  num_rows,
+                                                                                  num_cols);
     }
 }
