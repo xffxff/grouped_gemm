@@ -43,8 +43,8 @@ class PermuteMoE(torch.autograd.Function):
 
     # Data type check
     if expert_for_rows.dtype != torch.int32:
-      print("[Warning] The data type of the input \"expert_for_rows\" of permute op is int64! "
-            "The recommended type is int32.", file=stderr)
+      print(f"[Warning] The data type of the input \"expert_for_rows\" of permute op is {expert_for_rows.dtype}! "
+            "The recommended type is torch.int32.", file=stderr)
       expert_for_rows = expert_for_rows.to(torch.int32)
 
     # Contiguous check
@@ -124,12 +124,12 @@ class UnpermuteMoE(torch.autograd.Function):
 
     # Data type check
     if expert_for_rows.dtype != torch.int32:
-      print("[Warning] The data type of the input \"expert_for_rows\" of unpermute op is int64! "
-            "The recommended type is int32.", file=stderr)
+      print(f"[Warning] The data type of the input \"expert_for_rows\" of unpermute op is {expert_for_rows.dtype}! "
+            "The recommended type is torch.int32.", file=stderr)
       expert_for_rows = expert_for_rows.to(torch.int32)
     if row_id_map.dtype != torch.int32:
-      print("[Warning] The data type of the input \"row_id_map\" of unpermute op is int64! "
-            "The recommended type is int32.", file=stderr)
+      print(f"[Warning] The data type of the input \"row_id_map\" of unpermute op is {row_id_map.dtype}! "
+            "The recommended type is torch.int32.", file=stderr)
       row_id_map = row_id_map.to(torch.int32)
 
     # Contiguous check
@@ -161,7 +161,7 @@ class UnpermuteMoE(torch.autograd.Function):
       row_id_map)
     
     return original_output
-  
+
   @staticmethod
   def backward(ctx, unpermuted_inputs_grad):
     if not unpermuted_inputs_grad.is_contiguous():
@@ -208,8 +208,8 @@ class PermuteMoE_topK(torch.autograd.Function):
 
     # Data type check
     if indices.dtype != torch.int32:
-      print("[Warning] The data type of the input \"indices\" of permute_topK op is int64! "
-            "The recommended type is int32.", file=stderr)
+      print(f"[Warning] The data type of the input \"indices\" of permute_topK op is {indices.dtype}! "
+            "The recommended type is torch.int32.", file=stderr)
       indices = indices.to(torch.int32)
 
     # Contiguous check
@@ -264,6 +264,95 @@ class PermuteMoE_topK(torch.autograd.Function):
 
 ################################################################################################
 ##
+## UnpermuteMoE topK
+##
+################################################################################################
+
+class UnpermuteMoE_topK(torch.autograd.Function):
+
+  @staticmethod
+  def forward(ctx,
+              input_act: torch.Tensor,
+              row_id_map: torch.Tensor,
+              probs: torch.Tensor):
+
+    # Device check
+    if input_act.is_cpu:
+      raise RuntimeError("[Error] The input \"input_act\" of unpermute_topK op is on the device: CPU!")
+    if row_id_map.is_cpu:
+      print("[Warning] The input \"row_id_map\" of unpermute_topK op is on the device: CPU!", file=stderr)
+      row_id_map = row_id_map.cuda()
+    if probs.is_cpu:
+      print("[Warning] The input \"probs\" of unpermute_topK op is on the device: CPU!", file=stderr)
+      probs = probs.cuda()
+
+    # Shape check
+    if row_id_map.size(0) != input_act.size(0):
+      raise RuntimeError(f"[Error] unpermute_topK op input \"row_id_map\" shape mismatch! "
+                         f"Expect {input_act.size(0)}, but got {row_id_map.size(0)}.")
+    if input_act.size(0) != probs.size(0) * probs.size(1):
+      raise RuntimeError(f"[Error] unpermute_topK op input \"probs\" shape mismatch! "
+                         f"Expect {input_act.size(0)}, but got {probs.size(0) * probs.size(1)}.")
+
+    # Data type check
+    if row_id_map.dtype != torch.int32:
+      print(f"[Warning] The data type of the input \"row_id_map\" of unpermute_topK op is {row_id_map.dtype}! "
+            "The recommended type is torch.int32.", file=stderr)
+      row_id_map = row_id_map.to(torch.int32)
+    if probs.dtype != torch.float32:
+      print(f"[Warning] The data type of the input \"probs\" of unpermute_topK op is {probs.dtype}! "
+            "The recommended type is torch.float32.", file=stderr)
+      probs = probs.to(torch.float32)
+
+    # Contiguous check
+    if not input_act.is_contiguous():
+      print("[Warning] The input \"input_act\" of unpermute_topK op is discontiguous!", file=stderr)
+      input_act = input_act.contiguous()
+    if not row_id_map.is_contiguous():
+      print("[Warning] The input \"row_id_map\" of unpermute_topK op is discontiguous!", file=stderr)
+      row_id_map = row_id_map.contiguous()
+    if not probs.is_contiguous():
+      print("[Warning] The input \"probs\" of unpermute_topK op is discontiguous!", file=stderr)
+      probs = probs.contiguous()
+
+    num_tokens = probs.size(0)
+    num_topK = probs.size(1)
+
+    unpermuted_output = torch.ops.moe_unit_ops.moe_recover_topK_op(
+      input_act,
+      row_id_map,
+      probs,
+      num_tokens,
+      num_topK)
+
+    ctx.save_for_backward(input_act, row_id_map, probs)
+
+    return unpermuted_output
+
+  @staticmethod
+  def backward(ctx, unpermuted_act_grad):
+
+    if not unpermuted_act_grad.is_contiguous():
+      unpermuted_act_grad = unpermuted_act_grad.contiguous()
+
+    input_act, row_id_map, probs = ctx.saved_tensors
+
+    act_grad = None
+    if ctx.needs_input_grad[0]:
+      act_grad, prob_grad = torch.ops.moe_unit_ops.moe_recover_topK_bwd_op(
+        unpermuted_act_grad,
+        input_act,
+        row_id_map,
+        probs)
+    
+    if not ctx.needs_input_grad[2]:
+      prob_grad = None
+
+    return act_grad, None, prob_grad
+
+
+################################################################################################
+##
 ## GroupedGemmMoE
 ##
 ################################################################################################
@@ -306,8 +395,8 @@ class GroupedGemmMoE(torch.autograd.Function):
       raise RuntimeError(f"[Error] groupedgemm op input data type mismatch! "
                          f"\"permuted_inputs\": {permuted_inputs.dtype}, \"weights_list\": {weights_list[0].dtype}.")
     if tokens_per_expert.dtype != torch.int32:
-      print("[Warning] The data type of the input \"tokens_per_expert\" of groupedgemm op is int64! "
-            "The recommended type is int32.", file=stderr)
+      print(f"[Warning] The data type of the input \"tokens_per_expert\" of groupedgemm op is {tokens_per_expert.dtype}! "
+            "The recommended type is torch.int32.", file=stderr)
       tokens_per_expert = tokens_per_expert.to(torch.int32)
 
     # Contiguous check
@@ -377,6 +466,9 @@ def permute_topK(input_act, indices, max_token_num=0):
 
 def unpermute(permuted_inputs, expert_for_rows, row_id_map, max_token_num=0):
   return UnpermuteMoE.apply(permuted_inputs, expert_for_rows, row_id_map, max_token_num)
+
+def unpermute_topK(input_act, row_id_map, probs):
+  return UnpermuteMoE_topK.apply(input_act, row_id_map, probs)
 
 def groupedgemm(permuted_inputs, tokens_per_expert, transB=False, *weights_list):
   return GroupedGemmMoE.apply(permuted_inputs, tokens_per_expert, transB, *weights_list)

@@ -353,6 +353,12 @@ std::tuple<torch::Tensor, torch::Tensor, std::vector<Tensor>> moe_permute_op(
     return std::make_tuple(permuted_output, row_id_map, workspace);
 }
 
+/////////////////////////////////////////////////////////////////////////////////////////////////
+//
+// Unpermute OP
+//
+/////////////////////////////////////////////////////////////////////////////////////////////////
+
 torch::Tensor moe_recover_op(
     Tensor permuted_input,
     Tensor row_id_map)
@@ -569,6 +575,12 @@ std::tuple<torch::Tensor, torch::Tensor, std::vector<Tensor>> moe_permute_topK_o
     return std::make_tuple(permuted_output, row_id_map, workspace);
 }
 
+/////////////////////////////////////////////////////////////////////////////////////////////////
+//
+// Unpermute_topK OP
+//
+/////////////////////////////////////////////////////////////////////////////////////////////////
+
 torch::Tensor moe_recover_topK_op(
     Tensor  input,
     Tensor  row_id_map,
@@ -660,6 +672,111 @@ torch::Tensor moe_recover_topK_op(
     return unpermuted_output;
 }
 
+std::tuple<torch::Tensor, torch::Tensor> moe_recover_topK_bwd_op(
+    Tensor  input_bwd,
+    Tensor  input_fwd,
+    Tensor  row_id_map,
+    Tensor  prob)
+{
+    const int num_tokens = prob.size(0);
+    const int num_topK = prob.size(1);
+    const int num_cols = input_bwd.size(1);
+
+    int *row_id_map_ptr = get_ptr<int>(row_id_map);
+    float *prob_ptr = get_ptr<float>(prob);
+
+    // activations type
+    const at::ScalarType _st = input_bwd.scalar_type();
+
+    // Output buffer alloc
+    Tensor act_grad =
+        torch::empty({num_tokens * num_topK, num_cols}, torch::dtype(_st).device(torch::kCUDA).requires_grad(false));
+    Tensor prob_grad =
+        torch::empty({num_tokens, num_topK}, torch::dtype(torch::kFloat32).device(torch::kCUDA).requires_grad(false));
+    float *prob_grad_ptr = get_ptr<float>(prob_grad);
+
+    auto stream = at::cuda::getCurrentCUDAStream().stream();
+
+    switch (_st)
+    {
+    case at::ScalarType::Float:
+    {
+        using dType = float;
+
+        dType *input_bwd_ptr = get_ptr<dType>(input_bwd);
+        dType *input_fwd_ptr = get_ptr<dType>(input_fwd);
+        dType *act_grad_ptr = get_ptr<dType>(act_grad);
+
+        moe_permute_topK_kernel_launcher<dType, true, 4>(
+            input_bwd_ptr,
+            act_grad_ptr,
+            nullptr,
+            row_id_map_ptr,
+            prob_ptr,
+            num_tokens,
+            num_topK,
+            num_cols,
+            stream,
+            prob_grad_ptr,
+            input_fwd_ptr);
+
+        break;
+    }
+    case at::ScalarType::Half:
+    {
+        using dType = half;
+
+        dType *input_bwd_ptr = get_ptr<dType>(input_bwd);
+        dType *input_fwd_ptr = get_ptr<dType>(input_fwd);
+        dType *act_grad_ptr = get_ptr<dType>(act_grad);
+
+        moe_permute_topK_kernel_launcher<dType, true, 8>(
+            input_bwd_ptr,
+            act_grad_ptr,
+            nullptr,
+            row_id_map_ptr,
+            prob_ptr,
+            num_tokens,
+            num_topK,
+            num_cols,
+            stream,
+            prob_grad_ptr,
+            input_fwd_ptr);
+
+        break;
+    }
+#ifdef ENABLE_BF16
+    case at::ScalarType::BFloat16:
+    {
+        using dType = __nv_bfloat16;
+
+        dType *input_bwd_ptr = get_ptr<dType>(input_bwd);
+        dType *input_fwd_ptr = get_ptr<dType>(input_fwd);
+        dType *act_grad_ptr = get_ptr<dType>(act_grad);
+
+        moe_permute_topK_kernel_launcher<dType, true, 8>(
+            input_bwd_ptr,
+            act_grad_ptr,
+            nullptr,
+            row_id_map_ptr,
+            prob_ptr,
+            num_tokens,
+            num_topK,
+            num_cols,
+            stream,
+            prob_grad_ptr,
+            input_fwd_ptr);
+
+        break;
+    }
+#endif
+    default:
+        throw std::runtime_error("Wrong activation tensor type.");
+    }
+
+    return std::make_tuple(act_grad, prob_grad);
+}
+
 /////////////////////////////////////////////////////////////////////////////////////////////////
 //
 // TORCH_LIBRARY
@@ -674,6 +791,7 @@ TORCH_LIBRARY(moe_unit_ops, m)
     m.def("moe_recover_op", moe_recover_op);
     m.def("moe_permute_topK_op", moe_permute_topK_op);
     m.def("moe_recover_topK_op", moe_recover_topK_op);
+    m.def("moe_recover_topK_bwd_op", moe_recover_topK_bwd_op);
     // TODO: find a more reasonable repo to place this kernel.
     m.def("sinkhorn", sinkhorn);
 }
