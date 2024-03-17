@@ -21,6 +21,8 @@
 #include "cutlass_kernels/moe_gemm/moe_permute_kernels.h"
 #include "cutlass_kernels/moe_gemm/moe_gemm_utils.h"
 
+#include "cublas_wrapper.h"
+
 using torch::Tensor;
 
 namespace groupedgemmformoe {
@@ -66,18 +68,39 @@ Tensor run_group_gemm_helper(Tensor              input_activations,
         torch::empty({gemm_m, gemm_n}, torch::dtype(_st).device(torch::kCUDA).requires_grad(false));
     T *fc1_output_ptr = get_ptr<T>(fc1_output);
 
-    groupedgemmformoe::MoeGemmRunner<T, WeightType> moe_gemm_runner_;
+    int sm_ = getSMVersion();
 
-    moe_gemm_runner_.moe_gemm(input_act_ptr,
-                              fc1_expert_weights_ptr_list,
-                              fc1_output_ptr,
-                              tokens_per_expert_ptr, // gemm_m
-                              gemm_n,                // gemm_n
-                              gemm_k,                // gemm_k
-                              gemm_m,                // num_tokens
-                              num_experts,
-                              transB,
-                              stream);
+    if (sm_ != 90)
+    {
+        groupedgemmformoe::MoeGemmRunner<T, WeightType> moe_gemm_runner_;
+
+        moe_gemm_runner_.moe_gemm(input_act_ptr,
+                                  fc1_expert_weights_ptr_list,
+                                  fc1_output_ptr,
+                                  tokens_per_expert_ptr, // gemm_m
+                                  gemm_n,                // gemm_n
+                                  gemm_k,                // gemm_k
+                                  gemm_m,                // num_tokens
+                                  num_experts,
+                                  transB,
+                                  stream);
+    }
+    else
+    {
+        if (!cublas_init)
+            cublas_handle_init();
+
+        cublas_group_gemm_helper<T>(
+            input_act_ptr,
+            fc1_expert_weights_ptr_list,
+            fc1_output_ptr,
+            tokens_per_expert_ptr, // gemm_m
+            gemm_n,                // gemm_n
+            gemm_k,                // gemm_k
+            num_experts,
+            transB,
+            stream);
+    }
 
     return fc1_output;
 }
@@ -122,18 +145,39 @@ Tensor run_group_gemm_backward_helper(Tensor input_activations,
     }
     T *fc1_output_ptr = get_ptr<T>(fc1_output);
 
-    groupedgemmformoe::MoeGemmRunner<T, WeightType> moe_gemm_runner_;
+    int sm_ = getSMVersion();
 
-    moe_gemm_runner_.moe_gemm_backward(input_act_ptr,
-                                       fc1_expert_weights_ptr,
-                                       fc1_output_ptr,
-                                       gemm_m,                // gemm_m
-                                       gemm_n,                // gemm_n
-                                       tokens_per_expert_ptr, // gemm_k
-                                       gemm_k,                // num_tokens
-                                       num_experts,
-                                       transC,
-                                       stream);
+    if (sm_ != 90)
+    {
+        groupedgemmformoe::MoeGemmRunner<T, WeightType> moe_gemm_runner_;
+
+        moe_gemm_runner_.moe_gemm_backward(input_act_ptr,
+                                           fc1_expert_weights_ptr,
+                                           fc1_output_ptr,
+                                           gemm_m,                // gemm_m
+                                           gemm_n,                // gemm_n
+                                           tokens_per_expert_ptr, // gemm_k
+                                           gemm_k,                // num_tokens
+                                           num_experts,
+                                           transC,
+                                           stream);
+    }
+    else
+    {
+        if (!cublas_init)
+            cublas_handle_init();
+
+        cublas_group_gemm_helper<T>(
+            input_act_ptr,
+            fc1_expert_weights_ptr,
+            fc1_output_ptr,
+            gemm_m,                // gemm_m
+            gemm_n,                // gemm_n
+            tokens_per_expert_ptr, // gemm_k
+            num_experts,
+            transC,
+            stream);
+    }
 
     return fc1_output;
 }

@@ -530,7 +530,7 @@ void MoeGemmRunner<T, WeightType>::run_gemm_backward(
     {
         if (sm_ == 86 || sm_ == 89)
             chosen_config.stages = 4;
-        else
+        else // sm_ == 80
             chosen_config.stages = 6;
     }
     else

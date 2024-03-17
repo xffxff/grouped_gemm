@@ -550,7 +550,7 @@ void MoeGemmRunner<T, WeightType>::run_gemm(T*           A,
     {
         if (sm_ == 86 || sm_ == 89)
             chosen_config.stages = 3;
-        else
+        else // sm_ == 80
             chosen_config.stages = 7;
     }
     else

@@ -163,6 +163,7 @@ class TestMoe(unittest.TestCase):
                           dtype,
                           atol,
                           RAND_INPUT_ACT,
+                          RAND_INPUT_WEIGHT,
                           PRINT):
 
     rand_mean = 0
@@ -188,7 +189,12 @@ class TestMoe(unittest.TestCase):
       print("unpermuted_inputs: {}".format(inputs["input_activations"]))
 
     weights = dict()
-    weights["fc1_expert_weights_for_ft"] = random_cuda_tensor([num_experts, hidden_size, inter_size], dtype, mean=rand_mean, std=rand_std)    
+    if RAND_INPUT_WEIGHT:
+      weights["fc1_expert_weights_for_ft"] = random_cuda_tensor([num_experts, hidden_size, inter_size], dtype, mean=rand_mean, std=rand_std)    
+    else:
+      weights["fc1_expert_weights_for_ft"] = torch.empty((num_experts, hidden_size, inter_size), dtype=dtype, device="cuda")
+      for i in range(num_experts):
+          weights["fc1_expert_weights_for_ft"][i] = i
 
     # weights["fc1_expert_biases"] = random_cuda_tensor([num_experts, inter_size], dtype, mean=rand_mean, std=rand_std)
     weights["fc1_expert_biases"] = torch.zeros([num_experts, inter_size], dtype=dtype, device="cuda")
@@ -390,6 +396,7 @@ class TestMoe(unittest.TestCase):
 
   def test_grouped_gemm(self):
     RAND_INPUT_ACT = True
+    RAND_INPUT_WEIGHT = True
     PRINT = False
 
     num_rows = 4096 * 2
@@ -401,11 +408,11 @@ class TestMoe(unittest.TestCase):
 
     print()
     dtype = torch.float32
-    self.grouped_gemm_helper(num_rows, hidden_size, inter_size, num_experts, dtype, atol, RAND_INPUT_ACT, PRINT)
+    self.grouped_gemm_helper(num_rows, hidden_size, inter_size, num_experts, dtype, atol, RAND_INPUT_ACT, RAND_INPUT_WEIGHT, PRINT)
     dtype = torch.float16
-    self.grouped_gemm_helper(num_rows, hidden_size, inter_size, num_experts, dtype, atol, RAND_INPUT_ACT, PRINT)
+    self.grouped_gemm_helper(num_rows, hidden_size, inter_size, num_experts, dtype, atol, RAND_INPUT_ACT, RAND_INPUT_WEIGHT, PRINT)
     dtype = torch.bfloat16
-    self.grouped_gemm_helper(num_rows, hidden_size, inter_size, num_experts, dtype, atol, RAND_INPUT_ACT, PRINT)
+    self.grouped_gemm_helper(num_rows, hidden_size, inter_size, num_experts, dtype, atol, RAND_INPUT_ACT, RAND_INPUT_WEIGHT, PRINT)
 
   def test_grouped_gemm_backward(self):
     RAND_INPUT_ACT = True
