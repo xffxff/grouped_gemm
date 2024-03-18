@@ -284,52 +284,58 @@ Tensor moe_group_gemm_backward_op(Tensor input_activations,
 std::tuple<torch::Tensor, torch::Tensor, std::vector<Tensor>> moe_permute_op(
     Tensor original_input,
     Tensor expert_for_rows,
+    Tensor row_id_map,
     std::vector<Tensor> workspace,
     int64_t max_token_num)
 {
-    // initialize the workspace on the first run
-    if (workspace.empty()) {
-        auto options = torch::TensorOptions().dtype(torch::kInt32).device(torch::kCUDA).requires_grad(false);
-        Tensor row_id = torch::range(0, max_token_num - 1, 1, options);
-        Tensor sorted_expert_for_rows = torch::empty(max_token_num, options);
-
-        size_t temp_storage_bytes = 0;
-        int *temp_ptr = nullptr;
-        cub::DeviceRadixSort::SortPairs(nullptr, temp_storage_bytes,
-                                        temp_ptr, temp_ptr,
-                                        temp_ptr, temp_ptr, max_token_num);
-        Tensor temp_storage = 
-            torch::empty(temp_storage_bytes, torch::dtype(torch::kInt8).device(torch::kCUDA).requires_grad(false));
-
-        workspace.push_back(row_id);
-        workspace.push_back(sorted_expert_for_rows);
-        workspace.push_back(temp_storage);
-    }
-
     const int num_rows = original_input.size(0);
     const int num_cols = original_input.size(1);
 
     // activations type
     const at::ScalarType _st = original_input.scalar_type();
 
+    if (!row_id_map.defined()) {
+        // initialize the workspace on the first run
+        if (workspace.empty()) {
+            auto options = torch::TensorOptions().dtype(torch::kInt32).device(torch::kCUDA).requires_grad(false);
+            Tensor row_id = torch::range(0, max_token_num - 1, 1, options);
+            Tensor sorted_expert_for_rows = torch::empty(max_token_num, options);
+
+            size_t temp_storage_bytes = 0;
+            int *temp_ptr = nullptr;
+            cub::DeviceRadixSort::SortPairs(nullptr, temp_storage_bytes,
+                                            temp_ptr, temp_ptr,
+                                            temp_ptr, temp_ptr, max_token_num);
+            Tensor temp_storage = 
+                torch::empty(temp_storage_bytes, torch::dtype(torch::kInt8).device(torch::kCUDA).requires_grad(false));
+
+            workspace.push_back(row_id);
+            workspace.push_back(sorted_expert_for_rows);
+            workspace.push_back(temp_storage);
+        }
+
+        // Output buffer alloc
+        row_id_map = 
+            torch::empty(num_rows, torch::dtype(torch::kInt32).device(torch::kCUDA).requires_grad(false));
+
+        int *expert_for_rows_ptr = get_ptr<int>(expert_for_rows);
+        int *row_id_ptr = get_ptr<int>(workspace[0]);
+        int *sorted_expert_for_rows_ptr = get_ptr<int>(workspace[1]);
+        int *row_id_map_ptr = get_ptr<int>(row_id_map);
+
+        // Run sorting operation
+        void *d_temp_storage = get_ptr<void>(workspace[2]);
+        size_t temp_storage_bytes = std::numeric_limits<size_t>::max();
+        cub::DeviceRadixSort::SortPairs(d_temp_storage, temp_storage_bytes,
+                                        expert_for_rows_ptr, sorted_expert_for_rows_ptr,
+                                        row_id_ptr, row_id_map_ptr, num_rows);
+    }
+
     // Output buffer alloc
     Tensor permuted_output =
         torch::empty({num_rows, num_cols}, torch::dtype(_st).device(torch::kCUDA).requires_grad(false));
-    Tensor row_id_map = 
-        torch::empty(num_rows, torch::dtype(torch::kInt32).device(torch::kCUDA).requires_grad(false));
 
-    int *expert_for_rows_ptr = get_ptr<int>(expert_for_rows);
-    int *row_id_ptr = get_ptr<int>(workspace[0]);
-    int *sorted_expert_for_rows_ptr = get_ptr<int>(workspace[1]);
     int *row_id_map_ptr = get_ptr<int>(row_id_map);
-
-    // Run sorting operation
-    void *d_temp_storage = get_ptr<void>(workspace[2]);
-    size_t temp_storage_bytes = std::numeric_limits<size_t>::max();
-    cub::DeviceRadixSort::SortPairs(d_temp_storage, temp_storage_bytes,
-                                    expert_for_rows_ptr, sorted_expert_for_rows_ptr,
-                                    row_id_ptr, row_id_map_ptr, num_rows);
-
     auto stream = at::cuda::getCurrentCUDAStream().stream();
 
     switch (_st)
@@ -642,7 +648,7 @@ torch::Tensor moe_recover_topK_op(
         torch::empty({num_tokens, num_cols}, torch::dtype(_st).device(torch::kCUDA).requires_grad(false));
 
     int *row_id_map_ptr = get_ptr<int>(row_id_map);
-    float *prob_ptr = get_ptr<float>(prob);
+    float *prob_ptr = (prob.defined()) ? get_ptr<float>(prob) : nullptr;
     auto stream = at::cuda::getCurrentCUDAStream().stream();
 
     switch (_st)

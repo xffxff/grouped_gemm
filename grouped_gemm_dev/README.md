@@ -84,9 +84,7 @@ The output tuple of `(torch.Tensor, torch.Tensor)` that contains two tensors `pe
 > ```py
 > moe.ops.unpermute(
 >   permuted_inputs: torch.Tensor,
->   expert_for_rows: torch.Tensor,
->   row_id_map: torch.Tensor,
->   max_token_num=0: int) -> torch.Tensor
+>   row_id_map: torch.Tensor) -> torch.Tensor
 > ```
 
 The mirror operator of `moe.ops.permute`.
@@ -97,16 +95,9 @@ The mirror operator of `moe.ops.permute`.
     &emsp;shape = [tokens_num, hidden_size]  
     &emsp;The permuted activations output by `moe.ops.permute`.
 
-* **expert_for_rows** (torch.Tensor)  
-    &emsp;shape = [tokens_num]  
-    &emsp;The expert index for each row of original unpermuted activations. The `int32` type is recommended.
-
 * **row_id_map** (torch.Tensor)  
     &emsp;shape = [tokens_num]  
     &emsp;The mapping table for the row indices of the original unpermuted activations before and after `moe.ops.permute`. The second output tensor of `moe.ops.permute`.
-
-* **max_token_num** (int)  
-    &emsp;The maximum number of tokens (rows) used for workspace allocation.
 
 ### Example
 
@@ -116,7 +107,7 @@ from grouped_gemm import permute
 expert_for_rows = torch.tensor([2, 0, 1, 0], dtype=torch.int32, device='cuda')
 unpermuted_inputs = torch.tensor([[0,0,0,0], [1,1,1,1], [2,2,2,2], [3,3,3,3]], dtype=torch.float32, device='cuda')
 permuted_inputs, row_id_map = permute(unpermuted_inputs, expert_for_rows)
-unpermute_outputs = unpermute(permuted_inputs, expert_for_rows, row_id_map)
+unpermute_outputs = unpermute(permuted_inputs, row_id_map)
 
 print(row_id_map)
 print(unpermuted_inputs)

@@ -58,7 +58,7 @@ class TestMoeOps(unittest.TestCase):
       # expert_for_rows = torch.nn.functional.pad(expert_for_rows, [0, 1])
 
       nvtx.range_push("unpermute op forward")
-      _1_unpermute_outputs = unpermute(_1_permuted_inputs, _1_expert_for_rows, _1_row_id_map, max_token_num)
+      _1_unpermute_outputs = unpermute(_1_permuted_inputs, _1_row_id_map)
       nvtx.range_pop()
 
       nvtx.range_push("permute op forward")
@@ -66,7 +66,7 @@ class TestMoeOps(unittest.TestCase):
       nvtx.range_pop()
 
       nvtx.range_push("unpermute op forward")
-      _2_unpermute_outputs = unpermute(_2_permuted_inputs, _2_expert_for_rows, _2_row_id_map, max_token_num)
+      _2_unpermute_outputs = unpermute(_2_permuted_inputs, _2_row_id_map)
       nvtx.range_pop()
 
       # Reset grad to avoid accumulation
