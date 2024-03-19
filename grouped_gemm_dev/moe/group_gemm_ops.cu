@@ -393,6 +393,42 @@ std::tuple<torch::Tensor, torch::Tensor, std::vector<Tensor>> moe_permute_op(
         break;
     }
 #endif
+#ifdef ENABLE_FP8
+    case at::ScalarType::Float8_e5m2:
+    {
+        using dType = __nv_fp8_e5m2;
+
+        dType *original_input_ptr = get_ptr<dType>(original_input);
+        dType *permuted_output_ptr = get_ptr<dType>(permuted_output);
+
+        moe_permute_kernel_launcher<dType, true, 16>(
+            original_input_ptr,
+            permuted_output_ptr,
+            row_id_map_ptr,
+            num_rows,
+            num_cols,
+            stream);
+
+        break;
+    }
+    case at::ScalarType::Float8_e4m3fn:
+    {
+        using dType = __nv_fp8_e4m3;
+
+        dType *original_input_ptr = get_ptr<dType>(original_input);
+        dType *permuted_output_ptr = get_ptr<dType>(permuted_output);
+
+        moe_permute_kernel_launcher<dType, true, 16>(
+            original_input_ptr,
+            permuted_output_ptr,
+            row_id_map_ptr,
+            num_rows,
+            num_cols,
+            stream);
+
+        break;
+    }
+#endif
     default:
         throw std::runtime_error("Wrong activation tensor type.");
     }
@@ -471,6 +507,42 @@ torch::Tensor moe_recover_op(
         dType *unpermuted_output_ptr = get_ptr<dType>(unpermuted_output);
 
         moe_permute_kernel_launcher<dType, false, 8>(
+            permuted_input_ptr,
+            unpermuted_output_ptr,
+            row_id_map_ptr,
+            num_rows,
+            num_cols,
+            stream);
+
+        break;
+    }
+#endif
+#ifdef ENABLE_FP8
+    case at::ScalarType::Float8_e5m2:
+    {
+        using dType = __nv_fp8_e5m2;
+
+        dType *permuted_input_ptr = get_ptr<dType>(permuted_input);
+        dType *unpermuted_output_ptr = get_ptr<dType>(unpermuted_output);
+
+        moe_permute_kernel_launcher<dType, false, 16>(
+            permuted_input_ptr,
+            unpermuted_output_ptr,
+            row_id_map_ptr,
+            num_rows,
+            num_cols,
+            stream);
+
+        break;
+    }
+    case at::ScalarType::Float8_e4m3fn:
+    {
+        using dType = __nv_fp8_e4m3;
+
+        dType *permuted_input_ptr = get_ptr<dType>(permuted_input);
+        dType *unpermuted_output_ptr = get_ptr<dType>(unpermuted_output);
+
+        moe_permute_kernel_launcher<dType, false, 16>(
             permuted_input_ptr,
             unpermuted_output_ptr,
             row_id_map_ptr,

@@ -79,9 +79,12 @@ void moe_permute_kernel_launcher(
     const int num_cols,
     cudaStream_t stream)
 {
-    if (num_cols & 0x7 != 0)
-        throw std::runtime_error("num_cols of input activations must be multiples of 8.");
-
+    if ((num_cols & (kElementsPerAccess - 1)) != 0) // kElementsPerAccess here is a power of 2.
+    {
+        std::string message = "num_cols of input activations must be multiples of " + std::to_string(kElementsPerAccess) + ".";
+        throw std::runtime_error(message);
+    }
+    
     const int blocks = num_rows;
     const int threads = std::min(num_cols / kElementsPerAccess, 1024);
 
