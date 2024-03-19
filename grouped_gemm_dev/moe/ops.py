@@ -29,6 +29,10 @@ class PermuteMoE(torch.autograd.Function):
               expert_for_rows: torch.Tensor,
               max_token_num: int):
 
+    # Empty input check
+    if not unpermuted_inputs.numel():
+      return unpermuted_inputs, None
+
     # Device check
     if unpermuted_inputs.is_cpu:
       raise RuntimeError("[Error] The input \"unpermuted_inputs\" of permute op is on the device: CPU!")
@@ -79,6 +83,11 @@ class PermuteMoE(torch.autograd.Function):
 
   @staticmethod
   def backward(ctx, permuted_inputs_grad, _):
+
+    # Empty input check
+    if not permuted_inputs_grad.numel():
+      return permuted_inputs_grad, None, None
+
     if not permuted_inputs_grad.is_contiguous():
       permuted_inputs_grad = permuted_inputs_grad.contiguous()
     row_id_map = ctx.row_id_map
@@ -101,6 +110,10 @@ class UnpermuteMoE(torch.autograd.Function):
   def forward(ctx,
               permuted_inputs: torch.Tensor,
               row_id_map: torch.Tensor):
+
+    # Empty input check
+    if not permuted_inputs.numel():
+      return permuted_inputs
 
     # Device check
     if permuted_inputs.is_cpu:
@@ -137,6 +150,11 @@ class UnpermuteMoE(torch.autograd.Function):
 
   @staticmethod
   def backward(ctx, unpermuted_inputs_grad):
+
+    # Empty input check
+    if not unpermuted_inputs_grad.numel():
+      return unpermuted_inputs_grad, None
+
     if not unpermuted_inputs_grad.is_contiguous():
       unpermuted_inputs_grad = unpermuted_inputs_grad.contiguous()
 
@@ -168,6 +186,10 @@ class PermuteMoE_topK(torch.autograd.Function):
               input_act: torch.Tensor,
               indices: torch.Tensor,
               max_token_num: int):
+
+    # Empty input check
+    if not input_act.numel():
+      return input_act, None
 
     # Device check
     if input_act.is_cpu:
@@ -221,6 +243,11 @@ class PermuteMoE_topK(torch.autograd.Function):
 
   @staticmethod
   def backward(ctx, permuted_act_grad, _):
+    
+    # Empty input check
+    if not permuted_act_grad.numel():
+      return permuted_act_grad, None, None
+    
     if not permuted_act_grad.is_contiguous():
       permuted_act_grad = permuted_act_grad.contiguous()
 
@@ -250,6 +277,11 @@ class UnpermuteMoE_topK(torch.autograd.Function):
               input_act: torch.Tensor,
               row_id_map: torch.Tensor,
               probs: torch.Tensor):
+
+    # Empty input check
+    if not input_act.numel():
+      ctx.probs = probs
+      return input_act
 
     # Device check
     if input_act.is_cpu:
@@ -307,6 +339,10 @@ class UnpermuteMoE_topK(torch.autograd.Function):
   @staticmethod
   def backward(ctx, unpermuted_act_grad):
 
+    # Empty input check
+    if not unpermuted_act_grad.numel():
+      return unpermuted_act_grad, None, ctx.probs
+
     if not unpermuted_act_grad.is_contiguous():
       unpermuted_act_grad = unpermuted_act_grad.contiguous()
 
@@ -340,6 +376,16 @@ class GroupedGemmMoE(torch.autograd.Function):
               tokens_per_expert: torch.Tensor,
               transB: bool,
               *weights_list):
+
+    # Empty input check
+    if not permuted_inputs.numel():
+      ctx.weights_list = weights_list
+      ctx.transB = transB
+      ctx.device = permuted_inputs.device
+      ctx.dtype = permuted_inputs.dtype
+      ctx.size = (weights_list[0].size(0), weights_list[0].size(1))
+      num_cols = ctx.size[0] if transB else ctx.size[1]
+      return torch.empty(size=(0, num_cols), dtype=ctx.dtype, device=ctx.device)
 
     # Weight matrices num check
     if len(weights_list) != tokens_per_expert.size(0):
@@ -398,9 +444,19 @@ class GroupedGemmMoE(torch.autograd.Function):
 
   @staticmethod
   def backward(ctx, permuted_inputs_grad):
-    permuted_inputs, tokens_per_expert = ctx.saved_tensors
-    transB = ctx.transB
+
     weights_list = ctx.weights_list
+    transB = ctx.transB
+
+    # Empty input check
+    if not permuted_inputs_grad.numel():
+      weight_grad_list = []
+      for weight in weights_list:
+        weight_grad_list.append(torch.zeros_like(weight))
+      num_cols = ctx.size[1] if transB else ctx.size[0]
+      return torch.empty(size=(0, num_cols), dtype=ctx.dtype, device=ctx.device), None, None, *weight_grad_list
+
+    permuted_inputs, tokens_per_expert = ctx.saved_tensors
 
     if not permuted_inputs_grad.is_contiguous():
       permuted_inputs_grad = permuted_inputs_grad.contiguous()

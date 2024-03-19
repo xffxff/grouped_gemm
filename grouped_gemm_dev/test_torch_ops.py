@@ -96,16 +96,20 @@ class TestMoeOps(unittest.TestCase):
       print("original_inputs: {}".format(original_inputs))
       print("backward: {}".format(unpermuted_inputs.grad))
 
+    if not unpermuted_inputs.numel():
+      print("permute & unpermute empty input activation test passed.")
+      return
+
     # Result check
     original_inputs = original_inputs.float().cpu().numpy().flatten()
     original_output = _2_unpermute_outputs.float().cpu().detach().numpy().flatten()
     max_abs_error = abs(original_inputs - original_output).max()
-    print(f"permute & unpermute forward max error: \t\t{max_abs_error:.3e} ({dtype})")
+    print(f"permute & unpermute forward max error: \t\t\t{max_abs_error:.3e} ({dtype})")
     assert (max_abs_error < atol), "test_moe_permute failed!"
 
     original_output = unpermuted_inputs.grad.float().cpu().numpy().flatten()
     max_abs_error = abs(original_inputs - original_output).max()
-    print(f"permute & unpermute backward max error: \t{max_abs_error:.3e} ({dtype})")
+    print(f"permute & unpermute backward max error: \t\t{max_abs_error:.3e} ({dtype})")
     assert (max_abs_error < atol), "test_moe_permute failed!"
 
   def groupedgemm_ops_helper(self,
@@ -162,8 +166,8 @@ class TestMoeOps(unittest.TestCase):
 
     weights_grad = []
     for weights in weights_list:
-        weights_grad.append(weights.grad)
-    weights_grad = torch.cat(weights_grad)
+        weights_grad.append(weights.grad.unsqueeze(0))
+    weights_grad = torch.cat(weights_grad, dim=0)
 
     # Ref calculation
     gemm_output_ref_list = []
@@ -210,22 +214,26 @@ class TestMoeOps(unittest.TestCase):
       print("ref weight grad: ", weight_grad_ref)
 
     # Result check
+    if not permuted_inputs.numel():
+      print("grouped gemm empty input activation test passed.")
+      return
+
     gemm_output = gemm_output.float().cpu().detach().numpy().flatten()
     gemm_output_ref = gemm_output_ref.float().cpu().detach().numpy().flatten()
     max_abs_error = abs(gemm_output - gemm_output_ref).max()
-    print(f"group gemm forward max error: \t\t\t{max_abs_error:.3e} ({dtype})")
+    print(f"grouped gemm forward max error: \t\t\t{max_abs_error:.3e} ({dtype})")
     assert (max_abs_error < atol), "test_moe_groupedgemm failed!"
 
     gemm_output = permuted_inputs.grad.float().cpu().detach().numpy()
     gemm_output_ref = activation_grad_ref.float().cpu().detach().numpy()
     max_abs_error = abs(gemm_output - gemm_output_ref).max()
-    print(f"group gemm backward activation.grad max error: \t{max_abs_error:.3e} ({dtype})")
+    print(f"grouped gemm backward activation.grad max error: \t{max_abs_error:.3e} ({dtype})")
     assert (max_abs_error < atol), "test_moe_groupedgemm failed!"
 
     gemm_output = weights_grad.float().cpu().detach().numpy().flatten()
     gemm_output_ref = weight_grad_ref.float().cpu().detach().numpy().flatten()
     max_abs_error = abs(gemm_output - gemm_output_ref).max()
-    print(f"group gemm backward weight.grad max error: \t{max_abs_error:.3e} ({dtype})")
+    print(f"grouped gemm backward weight.grad max error: \t\t{max_abs_error:.3e} ({dtype})")
     assert (max_abs_error < atol), "test_moe_groupedgemm failed!"
 
 ################################################################################################
@@ -254,6 +262,8 @@ class TestMoeOps(unittest.TestCase):
     self.permute_ops_helper(num_rows, max_token_num, num_cols, num_experts, dtype, atol, execution_times, PRINT)
     dtype = torch.float8_e4m3fn
     self.permute_ops_helper(num_rows, max_token_num, num_cols, num_experts, dtype, atol, execution_times, PRINT)
+    num_rows = 0
+    self.permute_ops_helper(num_rows, max_token_num, num_cols, num_experts, dtype, atol, execution_times, PRINT)
 
   def test_moe_groupedgemm(self):
     # Note that the test directly uses the forward result as the input for the backward process, 
@@ -277,6 +287,10 @@ class TestMoeOps(unittest.TestCase):
     dtype = torch.bfloat16
     self.groupedgemm_ops_helper(num_rows, hidden_size, inter_size, num_experts, transB, dtype, atol, execution_times, PRINT)
     transB = True
+    self.groupedgemm_ops_helper(num_rows, hidden_size, inter_size, num_experts, transB, dtype, atol, execution_times, PRINT)
+    num_rows = 0
+    self.groupedgemm_ops_helper(num_rows, hidden_size, inter_size, num_experts, transB, dtype, atol, execution_times, PRINT)
+    transB = False
     self.groupedgemm_ops_helper(num_rows, hidden_size, inter_size, num_experts, transB, dtype, atol, execution_times, PRINT)
 
 def test_ops():

@@ -85,8 +85,10 @@ def permute_topK_test(
     #   for j in range(hidden_size):
     #     input[i][j] = i * 100 + j
     
-    indices = torch.stack([torch.randperm(num_expert)[:num_topK] for _ in range(num_token)])
-
+    if num_token > 0:
+        indices = torch.stack([torch.randperm(num_expert)[:num_topK] for _ in range(num_token)])
+    else:
+        indices = torch.empty((num_token, num_topK))
 
     # probs = torch.tensor([[0.1, 0.9],
     #                       [0.2, 0.8],
@@ -214,7 +216,7 @@ def permute_topK_test(
     probs_mine.retain_grad()
 
     unpermuted_act.backward(backward_input_unperm, retain_graph=True)
-    if torch.allclose(permuted_tokens.grad, permuted_act.grad):
+    if torch.allclose(permuted_tokens.grad, permuted_act.grad) == False:
         original_inputs = permuted_tokens.grad.float().cpu().detach().numpy().flatten()
         original_output = permuted_act.grad.float().cpu().detach().numpy().flatten()
         max_abs_error = abs(original_inputs - original_output).max()
@@ -234,6 +236,10 @@ def permute_topK_test(
         if PRINT:
             print(probs_mine.grad)
             print(probs.grad)
+
+    if not input.numel():
+      print("Empty input activation test passed.")
+      return
 
     ###################################################################################################################################
     #
@@ -322,4 +328,6 @@ if __name__ == "__main__":
     permute_topK_test(dtype, num_token, 5, hidden_size, 2, False, Benchmark)
     permute_topK_test(dtype, num_token, 6, hidden_size, 3, False, Benchmark)
     permute_topK_test(dtype, num_token, 7, hidden_size, 4, False, Benchmark)
+    permute_topK_test(dtype, num_token, 8, hidden_size, 5, False, Benchmark)
+    num_token = 0
     permute_topK_test(dtype, num_token, 8, hidden_size, 5, False, Benchmark)
