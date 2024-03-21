@@ -95,7 +95,7 @@ if use_jiangs_code:
 
 
     setup(
-        name="grouped_gemm",
+        name="grouped_gemm_01",
         version="0.5",
         author="Jiang Shao, Shiqing Fan",
         author_email="jiangs@nvidia.com, shiqingf@nvidia.com",
@@ -106,10 +106,10 @@ if use_jiangs_code:
             "License :: OSI Approved :: BSD License",
             "Operating System :: Unix",
         ],
-        package_dir={'grouped_gemm': 'grouped_gemm_dev'},
-        packages=['grouped_gemm', 'grouped_gemm.moe'],
+        package_dir={'grouped_gemm_01': 'grouped_gemm_dev'},
+        packages=['grouped_gemm_01', 'grouped_gemm_01.moe'],
         package_data={
-        'grouped_gemm': ['build/libmoe_unit_ops.so'],
+        'grouped_gemm_01': ['build/libmoe_unit_ops.so'],
         },
         cmdclass={"build_ext": BuildExtension},
         install_requires=["absl-py", "numpy", "torch"],
