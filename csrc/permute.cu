@@ -208,6 +208,8 @@ __global__ void moe_permute_topK_kernel(const T *input_bwd,
 
             int dest_row = row_id_map[index];
             index += num_rows;
+            if (dest_row == -1)
+                continue;
 
             if (hasProb)
             {
